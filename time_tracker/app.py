@@ -19,7 +19,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from . import db
+from time_tracker import db
 
 _NO_LABEL = "No label"
 
