@@ -11,7 +11,7 @@ dependencies = [
 ]
 
 [project.scripts]
-time-tracker = "app:main"
+time-tracker = "time_tracker.app:main"
 
-[tool.setuptools]
-py-modules = ["app", "db"]
+[tool.setuptools.packages.find]
+include = ["time_tracker*"]
