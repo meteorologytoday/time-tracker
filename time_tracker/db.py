@@ -2,7 +2,8 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
-DB_PATH = Path(__file__).parent / "time_tracker.db"
+DB_PATH = Path.home() / ".time_tracker" / "time_tracker.db"
+DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 LABEL_COLORS = [
     "#e74c3c",  # red
