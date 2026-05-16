@@ -325,6 +325,10 @@ class App(ctk.CTk):
             self._task_buttons[tid] = btn
 
 
-if __name__ == "__main__":
+def main():
     app = App()
     app.mainloop()
+
+
+if __name__ == "__main__":
+    main()
