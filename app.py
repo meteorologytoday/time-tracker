@@ -143,6 +143,7 @@ class App(ctk.CTk):
         dialog.title("Manage Labels")
         dialog.geometry("340x380")
         dialog.resizable(False, False)
+        dialog.update()
         dialog.grab_set()
 
         dialog.grid_columnconfigure(0, weight=1)
