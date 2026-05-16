@@ -38,11 +38,24 @@ class App(ctk.CTk):
 
     def _build_ui(self):
         self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(1, weight=1)
+        self.grid_rowconfigure(2, weight=1)
 
-        # ── Top: create new task ──
+        # ── Row 0: Timer display ──
+        timer_bar = ctk.CTkFrame(self, corner_radius=10)
+        timer_bar.grid(row=0, column=0, padx=16, pady=(16, 4), sticky="ew")
+
+        self._timer_label = ctk.CTkLabel(
+            timer_bar,
+            text="Timer: --:--:--",
+            font=("", 22, "bold"),
+            text_color="#f39c12",
+            anchor="center",
+        )
+        self._timer_label.pack(pady=14)
+
+        # ── Row 1: Create new task ──
         top = ctk.CTkFrame(self, corner_radius=10)
-        top.grid(row=0, column=0, padx=16, pady=(16, 8), sticky="ew")
+        top.grid(row=1, column=0, padx=16, pady=(4, 8), sticky="ew")
         top.grid_columnconfigure(0, weight=1)
 
         self._name_entry = ctk.CTkEntry(
@@ -58,17 +71,11 @@ class App(ctk.CTk):
             height=40,
             font=("", 14, "bold"),
             command=self._create_task,
-        ).grid(row=0, column=1, padx=(0, 8), pady=12)
+        ).grid(row=0, column=1, padx=(0, 12), pady=12)
 
-        # live timer shown while a task is recording
-        self._timer_label = ctk.CTkLabel(
-            top, text="", font=("", 16, "bold"), width=90, text_color="#f39c12"
-        )
-        self._timer_label.grid(row=0, column=2, padx=(0, 12), pady=12)
-
-        # ── Task list ──
+        # ── Row 2: Task list ──
         list_frame = ctk.CTkFrame(self, fg_color="transparent")
-        list_frame.grid(row=1, column=0, padx=16, pady=(0, 16), sticky="nsew")
+        list_frame.grid(row=2, column=0, padx=16, pady=(0, 16), sticky="nsew")
         list_frame.grid_rowconfigure(1, weight=1)
         list_frame.grid_columnconfigure(0, weight=1)
 
@@ -138,7 +145,7 @@ class App(ctk.CTk):
         self._active_task_id = None
         self._active_session_id = None
         self._start_ts = None
-        self._timer_label.configure(text="")
+        self._timer_label.configure(text="Timer: --:--:--")
 
         self._refresh_tasks()
 
@@ -149,7 +156,7 @@ class App(ctk.CTk):
             return
         elapsed = int(time.monotonic() - self._start_ts)
         total = self._active_base_seconds + elapsed
-        self._timer_label.configure(text=_fmt_duration(elapsed))
+        self._timer_label.configure(text=f"Timer: {_fmt_duration(elapsed)}")
         lbl = self._task_total_labels.get(self._active_task_id)
         if lbl:
             lbl.configure(text=_fmt_duration(total))
