@@ -16,6 +16,36 @@ def _fmt_duration(seconds: int) -> str:
     return f"{h:02d}:{m:02d}:{s:02d}"
 
 
+class _ColorPicker(ctk.CTkFrame):
+    """A row of colored swatch buttons; selected one has a white border."""
+
+    def __init__(self, parent, initial: str | None = None):
+        super().__init__(parent, fg_color="transparent")
+        self._selected = initial or db.LABEL_COLORS[0]
+        self._buttons: dict[str, ctk.CTkButton] = {}
+        for col, color in enumerate(db.LABEL_COLORS):
+            btn = ctk.CTkButton(
+                self, text="", width=26, height=26, corner_radius=5,
+                fg_color=color, hover_color=color,
+                border_width=2,
+                border_color="white" if color == self._selected else color,
+                command=lambda c=color: self._select(c),
+            )
+            btn.grid(row=0, column=col, padx=3)
+            self._buttons[color] = btn
+
+    def _select(self, color: str):
+        self._buttons[self._selected].configure(border_color=self._selected)
+        self._selected = color
+        self._buttons[color].configure(border_color="white")
+
+    def get(self) -> str:
+        return self._selected
+
+    def reset(self):
+        self._select(db.LABEL_COLORS[0])
+
+
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
@@ -141,7 +171,7 @@ class App(ctk.CTk):
     def _open_labels_dialog(self):
         dialog = ctk.CTkToplevel(self)
         dialog.title("Manage Labels")
-        dialog.geometry("340x380")
+        dialog.geometry("400x420")
         dialog.resizable(False, False)
         dialog.update()
         dialog.grab_set()
@@ -149,7 +179,7 @@ class App(ctk.CTk):
         dialog.grid_columnconfigure(0, weight=1)
         dialog.grid_rowconfigure(1, weight=1)
 
-        # create new label
+        # ── Create new label ──
         create_frame = ctk.CTkFrame(dialog, corner_radius=8)
         create_frame.grid(row=0, column=0, padx=14, pady=(14, 6), sticky="ew")
         create_frame.grid_columnconfigure(0, weight=1)
@@ -159,36 +189,70 @@ class App(ctk.CTk):
             create_frame, placeholder_text="Label name…",
             textvariable=name_var, height=34, font=("", 13),
         )
-        name_field.grid(row=0, column=0, padx=(10, 6), pady=10, sticky="ew")
-
-        color_var = ctk.StringVar(value=db.LABEL_COLORS[0])
-        color_menu = ctk.CTkOptionMenu(
-            create_frame,
-            values=db.LABEL_COLORS,
-            variable=color_var,
-            width=110, height=34, font=("", 12),
-        )
-        color_menu.grid(row=0, column=1, padx=(0, 6), pady=10)
+        name_field.grid(row=0, column=0, padx=(10, 8), pady=(10, 4), sticky="ew")
 
         def _add_label():
             n = name_var.get().strip()
             if not n:
                 return
-            db.create_label(n, color_var.get())
+            db.create_label(n, color_picker.get())
             name_var.set("")
+            color_picker.reset()
             self._refresh_label_menu()
             _refresh_list()
 
         ctk.CTkButton(
             create_frame, text="Add", width=52, height=34,
             font=("", 13, "bold"), command=_add_label,
-        ).grid(row=0, column=2, padx=(0, 10), pady=10)
+        ).grid(row=0, column=1, padx=(0, 10), pady=(10, 4))
         name_field.bind("<Return>", lambda _: _add_label())
 
-        # existing labels
+        color_picker = _ColorPicker(create_frame)
+        color_picker.grid(row=1, column=0, columnspan=2, padx=10, pady=(0, 10), sticky="w")
+
+        # ── Existing labels ──
         scroll = ctk.CTkScrollableFrame(dialog, corner_radius=8)
         scroll.grid(row=1, column=0, padx=14, pady=(0, 14), sticky="nsew")
         scroll.grid_columnconfigure(0, weight=1)
+
+        def _open_edit(lbl: dict):
+            edit = ctk.CTkToplevel(dialog)
+            edit.title("Edit Label")
+            edit.geometry("400x140")
+            edit.resizable(False, False)
+            edit.update()
+            edit.grab_set()
+            edit.grid_columnconfigure(0, weight=1)
+
+            name_e_var = ctk.StringVar(value=lbl["name"])
+            name_e = ctk.CTkEntry(
+                edit, textvariable=name_e_var, height=34, font=("", 13),
+            )
+            name_e.grid(row=0, column=0, padx=(12, 8), pady=(12, 4), sticky="ew")
+
+            ep = _ColorPicker(edit, initial=lbl["color"])
+            ep.grid(row=1, column=0, padx=12, pady=(0, 8), sticky="w")
+
+            def _save():
+                n = name_e_var.get().strip()
+                if not n:
+                    return
+                db.update_label(lbl["id"], n, ep.get())
+                self._refresh_label_menu()
+                self._refresh_tasks()
+                edit.destroy()
+                _refresh_list()
+
+            btn_row = ctk.CTkFrame(edit, fg_color="transparent")
+            btn_row.grid(row=2, column=0, padx=12, pady=(0, 12), sticky="e")
+            ctk.CTkButton(btn_row, text="Save", width=70, height=30,
+                          font=("", 13, "bold"), command=_save,
+                          ).pack(side="left", padx=(0, 6))
+            ctk.CTkButton(btn_row, text="Cancel", width=70, height=30,
+                          font=("", 13), fg_color="#555", hover_color="#444",
+                          command=edit.destroy,
+                          ).pack(side="left")
+            name_e.bind("<Return>", lambda _: _save())
 
         def _refresh_list():
             for w in scroll.winfo_children():
@@ -204,6 +268,11 @@ class App(ctk.CTk):
                 ctk.CTkLabel(
                     row, text=lbl["name"], anchor="w", font=("", 13),
                 ).grid(row=0, column=1, pady=6, sticky="ew")
+                ctk.CTkButton(
+                    row, text="Edit", width=48, height=26, font=("", 12),
+                    fg_color="#555", hover_color="#444",
+                    command=lambda l=lbl: _open_edit(l),
+                ).grid(row=0, column=2, padx=(0, 8), pady=6)
 
         _refresh_list()
 
