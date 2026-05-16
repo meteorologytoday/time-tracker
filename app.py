@@ -1,6 +1,4 @@
-import threading
 import time
-from datetime import datetime, timezone
 
 import customtkinter as ctk
 
@@ -127,7 +125,7 @@ class App(ctk.CTk):
         if btn:
             btn.configure(text="■  Stop", fg_color="#e74c3c", hover_color="#c0392b")
 
-        threading.Thread(target=self._tick, daemon=True).start()
+        self._tick()
 
     def _stop(self):
         self._running = False
@@ -144,19 +142,18 @@ class App(ctk.CTk):
 
         self._refresh_tasks()
 
-    # ── Background timer ─────────────────────────────────────────────────────
+    # ── Tick (main-thread, scheduled via self.after) ─────────────────────────
 
     def _tick(self):
-        while self._running:
-            elapsed = int(time.monotonic() - self._start_ts)
-            total = self._active_base_seconds + elapsed
-            text = _fmt_duration(elapsed)
-            total_text = _fmt_duration(total)
-            self.after(0, self._timer_label.configure, {"text": text})
-            lbl = self._task_total_labels.get(self._active_task_id)
-            if lbl:
-                self.after(0, lbl.configure, {"text": total_text})
-            time.sleep(1)
+        if not self._running:
+            return
+        elapsed = int(time.monotonic() - self._start_ts)
+        total = self._active_base_seconds + elapsed
+        self._timer_label.configure(text=_fmt_duration(elapsed))
+        lbl = self._task_total_labels.get(self._active_task_id)
+        if lbl:
+            lbl.configure(text=_fmt_duration(total))
+        self.after(1000, self._tick)
 
     # ── Task list ────────────────────────────────────────────────────────────
 
