@@ -63,6 +63,14 @@ def create_label(name: str, color: str) -> int:
         return cursor.lastrowid
 
 
+def update_label(label_id: int, name: str, color: str):
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE labels SET name = ?, color = ? WHERE id = ?",
+            (name, color, label_id),
+        )
+
+
 def get_labels() -> list[dict]:
     with _connect() as conn:
         conn.row_factory = sqlite3.Row
