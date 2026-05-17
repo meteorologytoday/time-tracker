@@ -260,19 +260,16 @@ class App(ctk.CTk):
             for i, lbl in enumerate(db.get_labels()):
                 row = ctk.CTkFrame(scroll, fg_color="#1e1e1e", corner_radius=4)
                 row.grid(row=i, column=0, sticky="ew", pady=1)
-                row.grid_columnconfigure(1, weight=1)
-                ctk.CTkLabel(
-                    row, text="•", text_color=lbl["color"],
-                    font=("", 16), width=24,
-                ).grid(row=0, column=0, padx=(8, 4), pady=6)
+                row.grid_columnconfigure(0, weight=1)
                 ctk.CTkLabel(
                     row, text=lbl["name"], anchor="w", font=("", 13),
-                ).grid(row=0, column=1, pady=6, sticky="ew")
+                    text_color=lbl["color"],
+                ).grid(row=0, column=0, pady=6, padx=(8, 0), sticky="ew")
                 ctk.CTkButton(
                     row, text="Edit", width=48, height=26, font=("", 12),
                     fg_color="#555", hover_color="#444",
                     command=lambda l=lbl: _open_edit(l),
-                ).grid(row=0, column=2, padx=(0, 8), pady=6)
+                ).grid(row=0, column=1, padx=(0, 8), pady=6)
 
         _refresh_list()
 
@@ -310,7 +307,7 @@ class App(ctk.CTk):
 
         btn = self._task_buttons.get(task_id)
         if btn:
-            btn.configure(text="■  Stop", fg_color="#e74c3c", hover_color="#c0392b")
+            btn.configure(text="Stop", fg_color="#e74c3c", hover_color="#c0392b")
 
         self._tick()
 
@@ -320,7 +317,7 @@ class App(ctk.CTk):
 
         btn = self._task_buttons.get(self._active_task_id)
         if btn:
-            btn.configure(text="▶  Record", fg_color="#2ecc71", hover_color="#27ae60")
+            btn.configure(text="Record", fg_color="#2ecc71", hover_color="#27ae60")
 
         self._active_task_id = None
         self._active_session_id = None
@@ -368,7 +365,7 @@ class App(ctk.CTk):
             label_color = task["label_color"] or "#888"
             ctk.CTkLabel(
                 row,
-                text=f"• {label_text}" if label_text else "",
+                text=label_text,
                 text_color=label_color,
                 width=90, anchor="w", font=("", 12),
             ).grid(row=0, column=1, padx=(0, 8), pady=6)
@@ -384,7 +381,7 @@ class App(ctk.CTk):
 
             btn = ctk.CTkButton(
                 row,
-                text="■  Stop" if is_active else "▶  Record",
+                text="Stop" if is_active else "Record",
                 width=95, height=28, font=("", 12),
                 fg_color="#e74c3c" if is_active else "#2ecc71",
                 hover_color="#c0392b" if is_active else "#27ae60",
