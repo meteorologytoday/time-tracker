@@ -1,4 +1,3 @@
-import sys
 import time
 
 import customtkinter as ctk
@@ -9,15 +8,6 @@ ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
 _NO_LABEL = "No label"
-
-# Per-platform font with reliable U+25CF (●) coverage
-def _dot_font(size: int) -> tuple:
-    if sys.platform == "win32":
-        return ("Segoe UI Symbol", size)
-    elif sys.platform == "darwin":
-        return ("Helvetica", size)
-    else:
-        return ("DejaVu Sans", size)
 
 
 def _fmt_duration(seconds: int) -> str:
@@ -272,8 +262,8 @@ class App(ctk.CTk):
                 row.grid(row=i, column=0, sticky="ew", pady=1)
                 row.grid_columnconfigure(1, weight=1)
                 ctk.CTkLabel(
-                    row, text="●", text_color=lbl["color"],
-                    font=_dot_font(16), width=24,
+                    row, text="•", text_color=lbl["color"],
+                    font=("", 16), width=24,
                 ).grid(row=0, column=0, padx=(8, 4), pady=6)
                 ctk.CTkLabel(
                     row, text=lbl["name"], anchor="w", font=("", 13),
@@ -378,9 +368,9 @@ class App(ctk.CTk):
             label_color = task["label_color"] or "#888"
             ctk.CTkLabel(
                 row,
-                text=f"● {label_text}" if label_text else "",
+                text=f"• {label_text}" if label_text else "",
                 text_color=label_color,
-                width=90, anchor="w", font=_dot_font(12),
+                width=90, anchor="w", font=("", 12),
             ).grid(row=0, column=1, padx=(0, 8), pady=6)
 
             total_lbl = ctk.CTkLabel(
