@@ -1,8 +1,9 @@
 import time
+from tkinter import filedialog
 
 import customtkinter as ctk
 
-from . import db
+from . import config, db
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
@@ -125,7 +126,18 @@ class App(ctk.CTk):
             fg_color="#555",
             hover_color="#444",
             command=self._open_labels_dialog,
-        ).grid(row=0, column=3, padx=(0, 12), pady=10)
+        ).grid(row=0, column=3, padx=(0, 8), pady=10)
+
+        ctk.CTkButton(
+            top,
+            text="Settings",
+            width=74,
+            height=36,
+            font=("", 13),
+            fg_color="#444",
+            hover_color="#333",
+            command=self._open_settings_dialog,
+        ).grid(row=0, column=4, padx=(0, 12), pady=10)
 
         # ── Row 2: Task list ──
         list_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -272,6 +284,67 @@ class App(ctk.CTk):
                 ).grid(row=0, column=1, padx=(0, 8), pady=6)
 
         _refresh_list()
+
+    # ── Settings dialog ───────────────────────────────────────────────────────
+
+    def _open_settings_dialog(self):
+        dialog = ctk.CTkToplevel(self)
+        dialog.title("Settings")
+        dialog.geometry("520x150")
+        dialog.resizable(False, False)
+        dialog.update()
+        dialog.grab_set()
+        dialog.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(
+            dialog, text="Database path:", anchor="w", font=("", 13),
+        ).grid(row=0, column=0, columnspan=3, padx=14, pady=(14, 4), sticky="ew")
+
+        path_var = ctk.StringVar(value=str(config.get_db_path()))
+        path_entry = ctk.CTkEntry(dialog, textvariable=path_var, height=34, font=("", 12))
+        path_entry.grid(row=1, column=0, padx=(14, 4), pady=(0, 4), sticky="ew")
+
+        def _browse():
+            current = path_var.get().strip()
+            from pathlib import Path as _Path
+            p = filedialog.asksaveasfilename(
+                parent=dialog,
+                title="Choose database location",
+                defaultextension=".db",
+                filetypes=[("SQLite database", "*.db"), ("All files", "*.*")],
+                initialfile=_Path(current).name if current else "time_tracker.db",
+                initialdir=str(_Path(current).parent) if current else str(_Path.home()),
+            )
+            if p:
+                path_var.set(p)
+
+        ctk.CTkButton(
+            dialog, text="Browse", width=74, height=34, font=("", 13),
+            fg_color="#555", hover_color="#444", command=_browse,
+        ).grid(row=1, column=1, padx=(0, 4), pady=(0, 4))
+
+        msg_label = ctk.CTkLabel(dialog, text="", font=("", 11), text_color="#e74c3c")
+        msg_label.grid(row=2, column=0, columnspan=2, padx=14, sticky="w")
+
+        def _save():
+            if self._running:
+                msg_label.configure(text="Please stop the active recording first.")
+                return
+            p = path_var.get().strip()
+            if not p:
+                msg_label.configure(text="Path cannot be empty.")
+                return
+            config.set_db_path(path_var.get().strip())
+            db.init_db()
+            self._refresh_label_menu()
+            self._refresh_tasks()
+            dialog.destroy()
+
+        ctk.CTkButton(
+            dialog, text="Save", width=60, height=34, font=("", 13, "bold"),
+            command=_save,
+        ).grid(row=1, column=2, padx=(0, 14), pady=(0, 4))
+        path_entry.bind("<Return>", lambda _: _save())
 
     # ── Create task ──────────────────────────────────────────────────────────
 
