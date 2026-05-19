@@ -167,6 +167,8 @@ Row 2  Scrollable task rows (CTkScrollableFrame)   ← weight=1
 
 **Dialogs**: All secondary windows (`CTkToplevel`) call `dialog.update()` before `dialog.grab_set()`. This prevents a race condition on some platforms where `grab_set()` fails if the window hasn't been rendered yet.
 
+**Window close**: `App.__init__` registers `_on_close` as the `WM_DELETE_WINDOW` handler. It calls `_stop()` if a session is in progress, then calls `self.destroy()`. Without this, closing the window mid-recording would leave the session's `end_time` and `duration_seconds` as `NULL` in the database.
+
 ---
 
 ## Key Design Decisions
@@ -205,10 +207,11 @@ Label colors are stored in `db.LABEL_COLORS` (8 options): red, orange, yellow, g
 - **Create tasks** with an optional label, via the top bar or Enter key.
 - **Record time**: one task at a time; switching tasks auto-stops the previous one.
 - **Live timer**: elapsed time for the current session shown in the top bar; task total updates every second.
-- **Labels**: create with custom name and color swatch; edit name/color; assign to tasks at creation or via Detail.
-- **Task detail dialog**: view and edit name, label, status; read-only created date and total time; scrollable session history with per-session start/end/duration; delete task with double confirmation.
+- **Labels**: create with custom name and color swatch; edit name/color; assign to tasks at creation or via Detail. Delete a label via the label manager — cascade-deletes all tasks and their sessions, with a confirmation that lists every affected task by name.
+- **Task detail dialog**: view and edit name, label, status; read-only created date and total time; scrollable session history with per-session start/end/duration; delete task with double confirmation (blocked while the task is actively recording).
 - **Task status**: `active` / `inactive` / `archived`; archived tasks have the Record button disabled. Status is editable in the Detail dialog.
 - **Status filter tabs**: segmented button above the list ("Active" default, "Inactive", "Archived", "All").
+- **Graceful shutdown**: closing the window while recording auto-stops and saves the active session before the process exits.
 - **Settings**: customizable database path with file browser; reloads the DB on save.
 
 ---
@@ -225,9 +228,6 @@ The most-requested next feature. Options to consider:
 - Export to CSV for external analysis.
 
 The DB query foundation: aggregate `sessions.duration_seconds` grouped by `tasks.label_id` or by `DATE(start_time)`.
-
-### Delete Labels
-Labels can be deleted via the Manage Labels dialog. Deleting a label cascade-deletes all tasks assigned to it and their sessions. The confirmation dialog lists the affected task names before the final destructive action.
 
 ### Session Editing
 The session history in the Detail dialog is currently read-only. Useful additions:
