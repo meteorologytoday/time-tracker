@@ -4,6 +4,20 @@ from pathlib import Path
 
 from . import config
 
+_SORT_EXPR: dict[str, str] = {
+    "name":          "t.name COLLATE NOCASE",
+    "label":         "COALESCE(l.name, '') COLLATE NOCASE",
+    "total_seconds": "total_seconds",
+    "status":        "t.status",
+    "priority": (
+        "CASE WHEN t.priority='high' THEN 1 "
+        "WHEN t.priority='medium' THEN 2 "
+        "WHEN t.priority='low' THEN 3 ELSE 4 END"
+    ),
+    "deadline": "t.deadline",
+    "id":       "t.id",
+}
+
 LABEL_COLORS = [
     "#e74c3c",  # red
     "#e67e22",  # orange
@@ -128,15 +142,39 @@ def create_task(name: str, label_id: int | None = None) -> int:
         return cursor.lastrowid
 
 
-def get_tasks(status: str | None = None) -> list[dict]:
+def get_tasks(
+    status: str | None = None,
+    label_ids: list[int] | None = None,
+    sort_col: str = "id",
+    sort_asc: bool = False,
+) -> list[dict]:
     """Return tasks with total accumulated duration and label info.
 
-    Pass status='active'/'inactive'/'archived' to filter; None returns all.
+    status:    filter by 'active'/'inactive'/'archived'; None = all.
+    label_ids: restrict to tasks whose label_id is in this list; None = all.
+    sort_col:  key from _SORT_EXPR; defaults to insertion order (id DESC).
+    sort_asc:  True = ascending, False = descending.
     """
     with _connect() as conn:
         conn.row_factory = sqlite3.Row
-        where = "WHERE t.status = ?" if status is not None else ""
-        params = (status,) if status is not None else ()
+        conditions, params = [], []
+        if status is not None:
+            conditions.append("t.status = ?")
+            params.append(status)
+        if label_ids:
+            placeholders = ",".join("?" * len(label_ids))
+            conditions.append(f"t.label_id IN ({placeholders})")
+            params.extend(label_ids)
+
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        direction = "ASC" if sort_asc else "DESC"
+        expr = _SORT_EXPR.get(sort_col, "t.id")
+        # Always put NULL deadlines last regardless of sort direction
+        if sort_col == "deadline":
+            order_by = f"(t.deadline IS NULL) ASC, t.deadline {direction}"
+        else:
+            order_by = f"{expr} {direction}"
+
         rows = conn.execute(f"""
             SELECT
                 t.id,
@@ -155,7 +193,7 @@ def get_tasks(status: str | None = None) -> list[dict]:
             LEFT JOIN sessions s ON s.task_id = t.id
             {where}
             GROUP BY t.id
-            ORDER BY t.id DESC
+            ORDER BY {order_by}
         """, params).fetchall()
         return [dict(r) for r in rows]
 
