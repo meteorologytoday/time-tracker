@@ -85,6 +85,8 @@ sessions (
 
 **Migration strategy**: `init_db()` uses `ALTER TABLE ... ADD COLUMN` guarded by `PRAGMA table_info`. New columns are appended at the end of `init_db()`. This keeps existing databases working without a migration framework.
 
+**Sorting**: `_SORT_EXPR` (module-level dict) maps column key strings to SQL expressions used in the `ORDER BY` clause of `get_tasks`. Priority uses a `CASE/WHEN` expression to impose high→medium→low→NULL ordering. Deadline uses `(t.deadline IS NULL) ASC` to push NULLs last regardless of direction. Adding a new sortable column means adding one entry to `_SORT_EXPR`.
+
 **Public API**:
 
 | Function | Description |
@@ -97,7 +99,7 @@ sessions (
 | `delete_label(label_id)` | Delete label and cascade-delete all its tasks and sessions (permanent) |
 | `set_task_label(task_id, label_id\|None)` | Quick label reassignment |
 | `create_task(name, label_id=None) -> int` | Returns new task id |
-| `get_tasks(status=None) -> list[dict]` | All tasks with totals; filter by status string or None for all |
+| `get_tasks(status=None, label_ids=None, sort_col="id", sort_asc=False) -> list[dict]` | Tasks with totals; filter by status and/or label ids; sort by any column key |
 | `get_task(task_id) -> dict\|None` | Single task with label info and total |
 | `update_task(task_id, name, label_id, status, notes=None, deadline=None, priority=None)` | Edit all mutable task fields |
 | `delete_task(task_id)` | Delete task and all its sessions (permanent) |
@@ -137,6 +139,11 @@ Single-file GUI. Everything is one `App(ctk.CTk)` class plus two module-level he
 | `_task_total_labels` | `dict[int, CTkLabel]` | Maps task id → total-time label, updated every tick |
 | `_label_name_to_id` | `dict[str, int]` | Display name → db id for the create-task label dropdown |
 | `_status_filter` | `str` | Current tab: `"Active"`, `"Inactive"`, `"Archived"`, or `"All"` |
+| `_label_filter` | `set[int]` | Label ids to include; empty set = no label restriction |
+| `_sort_col` | `str` | Active sort column key (matches a key in `_SORT_EXPR`); default `"id"` |
+| `_sort_asc` | `bool` | Sort direction; `False` = descending (newest-first default) |
+| `_header_widgets` | `dict[str, CTkButton]` | Column key → header button; updated by `_update_header_text()` to show ▲/▼ |
+| `_label_filter_frame` | `CTkFrame` | Container for label chip buttons; rebuilt by `_refresh_label_filter_bar()` |
 
 **Main window layout** (tkinter grid rows):
 
@@ -151,10 +158,13 @@ Row 2 is given `weight=1` so it stretches vertically when the window is resized.
 **Task list layout** (inside `list_frame`, also grid):
 
 ```
-Row 0  Filter bar (CTkSegmentedButton)
-Row 1  Column header (CTkFrame with labels)
-Row 2  Scrollable task rows (CTkScrollableFrame)   ← weight=1
+Row 0  Status filter bar (CTkSegmentedButton)
+Row 1  Label filter chip bar (CTkFrame)            — rebuilt on every label change
+Row 2  Column header (CTkFrame with buttons)       — sortable columns are CTkButtons
+Row 3  Scrollable task rows (CTkScrollableFrame)   ← weight=1
 ```
+
+Sortable column headers are `CTkButton` widgets (transparent background, amber text + ▲/▼ when active). Non-sortable columns (Record, Detail) remain `CTkLabel`. `_set_sort(col_key)` toggles direction when the same column is clicked, or resets to ascending for a new column, then calls `_update_header_text()` and `_refresh_tasks()`.
 
 **Task row columns** (inside each `CTkFrame` in the scroll):
 
@@ -221,6 +231,8 @@ Label colors are stored in `db.LABEL_COLORS` (8 options): red, orange, yellow, g
 - **Priority**: three levels — `high` (red), `medium` (amber), `low` (blue) — shown as a badge in the task list and as a dropdown in the Detail dialog.
 - **Deadline**: optional date (YYYY-MM-DD) set in the Detail dialog; validated with `date.fromisoformat()` on save.
 - **Status filter tabs**: segmented button above the list ("Active" default, "Inactive", "Archived", "All").
+- **Label filter chips**: a row of colored toggleable chip buttons below the status tabs, one per label. Multiple labels can be active simultaneously; only tasks whose label matches are shown. A "Clear" button appears when any chip is active. The chip row rebuilds whenever labels change, and stale ids are pruned from `_label_filter` automatically.
+- **Sortable columns**: clicking any column header sorts by that column (ascending first; click again to reverse). Active column highlighted in amber with ▲/▼. Sort is done in SQL via `_SORT_EXPR`. Priority sorts high→medium→low→unset; deadline sorts NULL-last in both directions. All filters (status, label, sort) compose.
 - **Graceful shutdown**: closing the window while recording auto-stops and saves the active session before the process exits.
 - **Settings**: customizable database path with file browser; reloads the DB on save.
 
@@ -246,12 +258,12 @@ The session history in the Detail dialog is currently read-only. Useful addition
 - Manually add a session for time tracked offline.
 
 ### Task Ordering / Pinning
-Tasks are ordered by `id DESC` (most recent first). Consider:
-- Drag-to-reorder with a `sort_order INTEGER` column.
-- Pin / favorite tasks to always appear at the top.
+Column sorting covers most ordering needs. Two remaining ideas:
+- Drag-to-reorder with a `sort_order INTEGER` column (persisted custom order).
+- Pin / favorite tasks to always appear at the top regardless of sort.
 
-### Search and Filtering
-A search box filtering the task list by name. Could combine with the status filter.
+### Search by Name
+A text-input search box filtering the task list by name substring. Would slot in alongside the existing status and label filters, passed as a `LIKE` clause in `get_tasks`.
 
 ### Multiple Databases / Workspaces
 Config already supports a custom DB path. A "recent databases" list or named workspaces would make switching contexts easier.
