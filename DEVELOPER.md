@@ -71,7 +71,9 @@ tasks (
                                   -- 'active' | 'inactive' | 'archived'
     notes      TEXT,              -- free-form user text, nullable
     deadline   TEXT,              -- date as YYYY-MM-DD, nullable
-    priority   TEXT               -- 'high' | 'medium' | 'low' | NULL
+    priority   TEXT,              -- 'high' | 'medium' | 'low' | NULL
+    pinned     INTEGER NOT NULL DEFAULT 0
+                                  -- 1 = pinned to top, 0 = normal
 )
 
 sessions (
@@ -85,7 +87,7 @@ sessions (
 
 **Migration strategy**: `init_db()` uses `ALTER TABLE ... ADD COLUMN` guarded by `PRAGMA table_info`. New columns are appended at the end of `init_db()`. This keeps existing databases working without a migration framework.
 
-**Sorting**: `_SORT_EXPR` (module-level dict) maps column key strings to SQL expressions used in the `ORDER BY` clause of `get_tasks`. Priority uses a `CASE/WHEN` expression to impose high→medium→low→NULL ordering. Deadline uses `(t.deadline IS NULL) ASC` to push NULLs last regardless of direction. Adding a new sortable column means adding one entry to `_SORT_EXPR`.
+**Sorting**: `_SORT_EXPR` (module-level dict) maps column key strings to SQL expressions used in the `ORDER BY` clause of `get_tasks`. Priority uses a `CASE/WHEN` expression to impose high→medium→low→NULL ordering. Deadline uses `(t.deadline IS NULL) ASC` to push NULLs last regardless of direction. Adding a new sortable column means adding one entry to `_SORT_EXPR`. The full ORDER BY always prepends `t.pinned DESC` so pinned tasks stay at the top regardless of the user's chosen sort column.
 
 **Public API**:
 
@@ -102,13 +104,14 @@ sessions (
 | `get_tasks(status=None, label_ids=None, sort_col="id", sort_asc=False) -> list[dict]` | Tasks with totals; filter by status and/or label ids; sort by any column key |
 | `get_task(task_id) -> dict\|None` | Single task with label info and total |
 | `update_task(task_id, name, label_id, status, notes=None, deadline=None, priority=None)` | Edit all mutable task fields |
+| `set_task_pinned(task_id, pinned: bool)` | Toggle pinned state (0/1) |
 | `delete_task(task_id)` | Delete task and all its sessions (permanent) |
 | `start_session(task_id) -> int` | Opens a session; returns session id |
 | `stop_session(session_id)` | Closes session, writes duration |
 | `get_task_sessions(task_id) -> list[dict]` | All sessions for a task, chronological |
 
 `get_tasks` and `get_task` return dicts with these keys:
-`id, name, created_at, label_id, status, priority, deadline, notes, label_name, label_color, total_seconds`
+`id, name, created_at, label_id, status, priority, deadline, notes, pinned, label_name, label_color, total_seconds`
 
 All timestamps are stored and returned as UTC ISO-8601 strings. The UI layer converts to local time for display using `datetime.fromisoformat(...).astimezone()`.
 
@@ -123,6 +126,8 @@ Single-file GUI. Everything is one `App(ctk.CTk)` class plus two module-level he
 - `_NO_LABEL = "No label"` — sentinel string used in dropdowns when no label is selected.
 - `_STATUS_STYLE: dict[str, tuple[str, str]]` — maps each status db value to `(display_text, hex_color)`.
 - `_PRIORITY_STYLE: dict[str, tuple[str, str]]` — maps each priority db value to `(display_text, hex_color)`: High=red, Med=amber, Low=blue.
+- `_COL_DEFS: dict[str, tuple[str, int, str]]` — maps each column key to `(header_label, fixed_width, anchor)`. Width `0` means flexible. Drives both header construction and task-row widget creation.
+- `_DEFAULT_COL_ORDER: list[str]` — the initial left-to-right order of data columns. Users can reorder via drag; the list is stored in `App._col_order` at runtime.
 - `_fmt_duration(seconds) -> str` — formats an integer of seconds as `HH:MM:SS`.
 - `_ColorPicker(ctk.CTkFrame)` — reusable widget: a row of colored swatch buttons where the selected swatch gets a white border. Used in both the label-create and label-edit flows.
 
@@ -144,16 +149,25 @@ Single-file GUI. Everything is one `App(ctk.CTk)` class plus two module-level he
 | `_sort_asc` | `bool` | Sort direction; `False` = descending (newest-first default) |
 | `_header_widgets` | `dict[str, CTkButton]` | Column key → header button; updated by `_update_header_text()` to show ▲/▼ |
 | `_label_filter_frame` | `CTkFrame` | Container for label chip buttons; rebuilt by `_refresh_label_filter_bar()` |
+| `_col_order` | `list[str]` | Current left-to-right order of data column keys; starts as `_DEFAULT_COL_ORDER`; mutated by drag-to-reorder |
+| `_hdr` | `CTkFrame` | Reference to the header frame; `_rebuild_header()` clears and repopulates it in-place |
+| `_drag_col` | `str \| None` | Column key being dragged; `None` when idle |
+| `_drag_start_x` | `int` | Root-x at `<ButtonPress-1>` — used to distinguish a click (< 8 px) from a drag |
+| `_active_task_name` | `str` | Name of the task being recorded — cached at `_start()` to avoid per-tick DB calls |
+| `_active_task_label` | `str \| None` | Label name of the task being recorded — cached at `_start()` |
+| `_stop_btn` | `CTkButton` | Stop button in the timer bar; enabled/red while recording, disabled/gray when idle |
 
 **Main window layout** (tkinter grid rows):
 
 ```
-Row 0  Timer bar (CTkFrame)         — large orange elapsed counter
+Row 0  Timer bar (CTkFrame)         — task label + elapsed time (amber) + Stop button
 Row 1  Create-task bar (CTkFrame)   — name entry, label dropdown, buttons
-Row 2  Task list (CTkFrame)         — contains: filter bar, header, scroll list
+Row 2  Task list (CTkFrame)         — contains: filter bars, header, scroll list
 ```
 
 Row 2 is given `weight=1` so it stretches vertically when the window is resized.
+
+**Timer bar** uses a two-column grid: col 0 (weight=1) holds the timer label; col 1 holds the Stop button. While recording the timer label shows `[Label] Task name: HH:MM:SS`; idle shows `--:--:--`. The Stop button is `state="disabled"` and gray when idle, red and enabled while recording.
 
 **Task list layout** (inside `list_frame`, also grid):
 
@@ -164,19 +178,22 @@ Row 2  Column header (CTkFrame with buttons)       — sortable columns are CTkB
 Row 3  Scrollable task rows (CTkScrollableFrame)   ← weight=1
 ```
 
-Sortable column headers are `CTkButton` widgets (transparent background, amber text + ▲/▼ when active). Non-sortable columns (Record, Detail) remain `CTkLabel`. `_set_sort(col_key)` toggles direction when the same column is clicked, or resets to ascending for a new column, then calls `_update_header_text()` and `_refresh_tasks()`.
+Column headers are `CTkButton` widgets with `cursor="hand2"` and `command=None`. They use `<ButtonPress-1>` / `<B1-Motion>` / `<ButtonRelease-1>` bindings. On release: if the mouse moved < 8 px it's treated as a sort click (`_set_sort`); if ≥ 8 px it's a drag — `_col_at_x()` finds the target column by checking `winfo_rootx()` of each header button, swaps the two entries in `_col_order`, and calls `_rebuild_header()` + `_refresh_tasks()`. Non-data columns (pin, Record, Detail) are plain `CTkLabel` and are not draggable.
 
-**Task row columns** (inside each `CTkFrame` in the scroll):
+`_rebuild_header()` clears all children of `self._hdr`, resets all column weights, then recreates buttons for each key in `_col_order` plus fixed placeholders for the pin and action columns. It sets `weight=1` on the column that holds `"name"` so the task-name column stays flexible regardless of position.
+
+**Task row columns** — the pin button is always col 0; data columns follow in `_col_order` order (cols 1…N); Record and Detail are always last. The flexible weight tracks whichever column index holds `"name"` in the current order.
 
 | Col | Widget | Width | Content |
 |---|---|---|---|
-| 0 | CTkLabel | 90 | Label badge (colored text) |
-| 1 | CTkLabel | flexible | Task name |
-| 2 | CTkLabel | 110 | Total time (amber) |
-| 3 | CTkLabel | 75 | Status badge (colored) |
-| 4 | CTkLabel | 75 | Priority badge (High/Med/Low, colored; empty if unset) |
-| 5 | CTkButton | 95 | Record / Stop |
-| 6 | CTkButton | 60 | Detail |
+| 0 | CTkButton | 36 | Pin toggle (amber tint when pinned, dim when not) |
+| 1…N | CTkLabel | per `_COL_DEFS` | Data columns in current `_col_order` |
+| N+1 | CTkButton | 95 | Record / Stop |
+| N+2 | CTkButton | 60 | Detail |
+
+Default `_col_order`: `label (90) · name (flex) · total_seconds (110) · deadline (100) · status (75) · priority (75)`
+
+Pinned rows get background `#211f0a` (amber tint) instead of the normal alternating dark grays, making them visually distinct at a glance. `_make_task_col_widget(parent, key, task, tid)` is the widget factory — add a new `if key == "..."` branch there to support a new column.
 
 **Timer mechanism**: `_start()` saves `time.monotonic()` and calls `_tick()`. `_tick()` computes `elapsed = now - _start_ts`, updates the timer bar and the active task's total label, then schedules itself again with `self.after(1000, self._tick)`. This runs entirely on the main thread — no threads, no concurrency issues.
 
@@ -214,6 +231,7 @@ The UI uses a fixed dark theme. Recurring colors:
 | Disabled button | `#444444` |
 | Row background (even) | `#1e1e1e` |
 | Row background (odd) | `#252525` |
+| Pinned row background | `#211f0a` |
 | Header bar | `#2b2b2b` |
 
 Label colors are stored in `db.LABEL_COLORS` (8 options): red, orange, yellow, green, teal, blue, purple, pink.
@@ -224,7 +242,7 @@ Label colors are stored in `db.LABEL_COLORS` (8 options): red, orange, yellow, g
 
 - **Create tasks** with an optional label, via the top bar or Enter key.
 - **Record time**: one task at a time; switching tasks auto-stops the previous one.
-- **Live timer**: elapsed time for the current session shown in the top bar; task total updates every second.
+- **Live timer**: the timer bar shows `[Label] Task name: HH:MM:SS` while recording (idle shows `--:--:--`); task total in the list updates every second. A **Stop button** sits at the right of the timer bar — always visible, enabled and red while recording, disabled and gray otherwise.
 - **Labels**: create with custom name and color swatch; edit name/color; assign to tasks at creation or via Detail. Delete a label via the label manager — cascade-deletes all tasks and their sessions, with a confirmation that lists every affected task by name.
 - **Task detail dialog**: view and edit name, label, status, priority, deadline (YYYY-MM-DD, validated), and free-text notes; read-only created date and total time; scrollable session history with per-session start/end/duration; delete task with double confirmation (blocked while the task is actively recording).
 - **Task status**: `active` / `inactive` / `archived`; archived tasks have the Record button disabled. Status is editable in the Detail dialog.
@@ -232,7 +250,10 @@ Label colors are stored in `db.LABEL_COLORS` (8 options): red, orange, yellow, g
 - **Deadline**: optional date (YYYY-MM-DD) set in the Detail dialog; validated with `date.fromisoformat()` on save.
 - **Status filter tabs**: segmented button above the list ("Active" default, "Inactive", "Archived", "All").
 - **Label filter chips**: a row of colored toggleable chip buttons below the status tabs, one per label. Multiple labels can be active simultaneously; only tasks whose label matches are shown. A "Clear" button is always visible at the far left of the chip bar. The chip row rebuilds whenever labels change, and stale ids are pruned from `_label_filter` automatically.
-- **Sortable columns**: clicking any column header sorts by that column (ascending first; click again to reverse). Active column highlighted in amber with ▲/▼. Sort is done in SQL via `_SORT_EXPR`. Priority sorts high→medium→low→unset; deadline sorts NULL-last in both directions. All filters (status, label, sort) compose.
+- **Pinned tasks**: a "pin" button (col 0) floats a task to the top of the list regardless of the active sort. Pinned rows have an amber-tinted background. Pinned ordering is enforced in SQL (`t.pinned DESC` is always the first ORDER BY term).
+- **Deadline in list**: the Deadline column is shown in the main list alongside other data columns. Past deadlines are rendered in red.
+- **Sortable columns**: clicking any column header sorts by that column (ascending first; click again to reverse). Active column highlighted in amber with ▲/▼. Sort is done in SQL via `_SORT_EXPR`. Priority sorts high→medium→low→unset; deadline sorts NULL-last in both directions. All filters (status, label, sort, pin) compose.
+- **Drag-to-reorder columns**: dragging a column header left or right swaps it with the column under the drop point. A move < 8 px is treated as a sort click instead. Column order is stored in `_col_order` and survives for the lifetime of the process (not yet persisted to disk).
 - **Graceful shutdown**: closing the window while recording auto-stops and saves the active session before the process exits.
 - **Settings**: customizable database path with file browser; reloads the DB on save.
 
@@ -257,10 +278,8 @@ The session history in the Detail dialog is currently read-only. Useful addition
 - Delete a session (with confirmation).
 - Manually add a session for time tracked offline.
 
-### Task Ordering / Pinning
-Column sorting covers most ordering needs. Two remaining ideas:
-- Drag-to-reorder with a `sort_order INTEGER` column (persisted custom order).
-- Pin / favorite tasks to always appear at the top regardless of sort.
+### Persist Column Order
+`_col_order` is reset to `_DEFAULT_COL_ORDER` on every launch. Saving it to `config.json` would let users keep their preferred layout across restarts.
 
 ### Search by Name
 A text-input search box filtering the task list by name substring. Would slot in alongside the existing status and label filters, passed as a `LIKE` clause in `get_tasks`.
