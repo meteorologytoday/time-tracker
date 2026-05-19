@@ -81,6 +81,7 @@ class App(ctk.CTk):
         db.init_db()
         self._refresh_label_menu()
         self._refresh_tasks()
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
 
     # ── UI construction ──────────────────────────────────────────────────────
 
@@ -437,6 +438,11 @@ class App(ctk.CTk):
             command=_save,
         ).grid(row=1, column=2, padx=(0, 14), pady=(0, 4))
         path_entry.bind("<Return>", lambda _: _save())
+
+    def _on_close(self):
+        if self._running:
+            self._stop()
+        self.destroy()
 
     def _set_status_filter(self, value: str):
         self._status_filter = value
