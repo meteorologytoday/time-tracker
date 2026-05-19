@@ -74,6 +74,8 @@ def init_db():
             conn.execute("ALTER TABLE tasks ADD COLUMN deadline TEXT")
         if "priority" not in cols:
             conn.execute("ALTER TABLE tasks ADD COLUMN priority TEXT")
+        if "pinned" not in cols:
+            conn.execute("ALTER TABLE tasks ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0")
 
 
 # ── Labels ────────────────────────────────────────────────────────────────────
@@ -185,6 +187,7 @@ def get_tasks(
                 t.priority,
                 t.deadline,
                 t.notes,
+                t.pinned,
                 l.name  AS label_name,
                 l.color AS label_color,
                 COALESCE(SUM(s.duration_seconds), 0) AS total_seconds
@@ -193,7 +196,7 @@ def get_tasks(
             LEFT JOIN sessions s ON s.task_id = t.id
             {where}
             GROUP BY t.id
-            ORDER BY {order_by}
+            ORDER BY t.pinned DESC, {order_by}
         """, params).fetchall()
         return [dict(r) for r in rows]
 
@@ -204,7 +207,7 @@ def get_task(task_id: int) -> dict | None:
         row = conn.execute("""
             SELECT
                 t.id, t.name, t.created_at, t.label_id, t.status,
-                t.priority, t.deadline, t.notes,
+                t.priority, t.deadline, t.notes, t.pinned,
                 l.name  AS label_name,
                 l.color AS label_color,
                 COALESCE(SUM(s.duration_seconds), 0) AS total_seconds
@@ -230,6 +233,13 @@ def update_task(
         conn.execute(
             "UPDATE tasks SET name=?, label_id=?, status=?, notes=?, deadline=?, priority=? WHERE id=?",
             (name, label_id, status, notes or None, deadline or None, priority or None, task_id),
+        )
+
+
+def set_task_pinned(task_id: int, pinned: bool):
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE tasks SET pinned = ? WHERE id = ?", (int(pinned), task_id)
         )
 
 
