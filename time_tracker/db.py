@@ -56,6 +56,10 @@ def init_db():
             conn.execute("ALTER TABLE tasks ADD COLUMN status TEXT NOT NULL DEFAULT 'active'")
         if "notes" not in cols:
             conn.execute("ALTER TABLE tasks ADD COLUMN notes TEXT")
+        if "deadline" not in cols:
+            conn.execute("ALTER TABLE tasks ADD COLUMN deadline TEXT")
+        if "priority" not in cols:
+            conn.execute("ALTER TABLE tasks ADD COLUMN priority TEXT")
 
 
 # ── Labels ────────────────────────────────────────────────────────────────────
@@ -140,6 +144,9 @@ def get_tasks(status: str | None = None) -> list[dict]:
                 t.created_at,
                 t.label_id,
                 t.status,
+                t.priority,
+                t.deadline,
+                t.notes,
                 l.name  AS label_name,
                 l.color AS label_color,
                 COALESCE(SUM(s.duration_seconds), 0) AS total_seconds
@@ -158,7 +165,8 @@ def get_task(task_id: int) -> dict | None:
         conn.row_factory = sqlite3.Row
         row = conn.execute("""
             SELECT
-                t.id, t.name, t.created_at, t.label_id, t.status, t.notes,
+                t.id, t.name, t.created_at, t.label_id, t.status,
+                t.priority, t.deadline, t.notes,
                 l.name  AS label_name,
                 l.color AS label_color,
                 COALESCE(SUM(s.duration_seconds), 0) AS total_seconds
@@ -171,11 +179,19 @@ def get_task(task_id: int) -> dict | None:
         return dict(row) if row else None
 
 
-def update_task(task_id: int, name: str, label_id: int | None, status: str, notes: str | None = None):
+def update_task(
+    task_id: int,
+    name: str,
+    label_id: int | None,
+    status: str,
+    notes: str | None = None,
+    deadline: str | None = None,
+    priority: str | None = None,
+):
     with _connect() as conn:
         conn.execute(
-            "UPDATE tasks SET name = ?, label_id = ?, status = ?, notes = ? WHERE id = ?",
-            (name, label_id, status, notes or None, task_id),
+            "UPDATE tasks SET name=?, label_id=?, status=?, notes=?, deadline=?, priority=? WHERE id=?",
+            (name, label_id, status, notes or None, deadline or None, priority or None, task_id),
         )
 
 
