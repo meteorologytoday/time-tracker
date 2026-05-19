@@ -1,5 +1,5 @@
 import time
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from tkinter import filedialog
 
 import customtkinter as ctk
@@ -659,7 +659,11 @@ class App(ctk.CTk):
             return lbl
         if key == "deadline":
             dl = task.get("deadline") or ""
-            color = "#e74c3c" if dl and dl < date.today().isoformat() else "#888"
+            if dl:
+                days_left = (date.fromisoformat(dl) - date.today()).days
+                color = "#e74c3c" if days_left < 3 else "#888"
+            else:
+                color = "#888"
             return ctk.CTkLabel(
                 parent, text=dl, width=100, anchor="w",
                 font=("", 11), text_color=color,
