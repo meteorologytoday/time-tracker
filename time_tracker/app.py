@@ -25,6 +25,17 @@ _PRIORITY_STYLE: dict[str, tuple[str, str]] = {
     "low":    ("Low",  "#3498db"),
 }
 
+# Reorderable column definitions: key → (header label, fixed width or 0 for flexible, anchor)
+_COL_DEFS: dict[str, tuple[str, int, str]] = {
+    "label":         ("Label",      90,  "w"),
+    "name":          ("Task",       0,   "w"),
+    "total_seconds": ("Total time", 110, "e"),
+    "deadline":      ("Deadline",   100, "w"),
+    "status":        ("Status",     75,  "w"),
+    "priority":      ("Priority",   75,  "w"),
+}
+_DEFAULT_COL_ORDER: list[str] = ["label", "name", "total_seconds", "deadline", "status", "priority"]
+
 
 def _fmt_duration(seconds: int) -> str:
     h, rem = divmod(seconds, 3600)
@@ -66,7 +77,7 @@ class App(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("Time Tracker")
-        self.geometry("880x580")
+        self.geometry("1060x580")
         self.resizable(True, True)
 
         self._active_task_id: int | None = None
@@ -90,8 +101,15 @@ class App(ctk.CTk):
         # sort state
         self._sort_col: str = "id"
         self._sort_asc: bool = False
-        # header button widgets (populated in _build_ui)
+        # header button widgets (populated in _rebuild_header)
         self._header_widgets: dict[str, ctk.CTkButton] = {}
+        # reorderable column order
+        self._col_order: list[str] = list(_DEFAULT_COL_ORDER)
+        # header frame reference (needed for rebuild)
+        self._hdr: ctk.CTkFrame | None = None
+        # drag-to-reorder state
+        self._drag_col: str | None = None
+        self._drag_start_x: int = 0
 
         self._build_ui()
         db.init_db()
@@ -108,6 +126,7 @@ class App(ctk.CTk):
         # ── Row 0: Timer display ──
         timer_bar = ctk.CTkFrame(self, corner_radius=10)
         timer_bar.grid(row=0, column=0, padx=16, pady=(16, 4), sticky="ew")
+        timer_bar.grid_columnconfigure(0, weight=1)
 
         self._timer_label = ctk.CTkLabel(
             timer_bar,
@@ -116,7 +135,17 @@ class App(ctk.CTk):
             text_color="#f39c12",
             anchor="center",
         )
-        self._timer_label.pack(pady=14)
+        self._timer_label.grid(row=0, column=0, pady=14, sticky="ew")
+
+        self._stop_btn = ctk.CTkButton(
+            timer_bar,
+            text="Stop",
+            width=80, height=34, font=("", 13, "bold"),
+            fg_color="#555", hover_color="#555",
+            command=self._stop,
+            state="disabled",
+        )
+        self._stop_btn.grid(row=0, column=1, padx=(0, 14), pady=10)
 
         # ── Row 1: Create new task ──
         top = ctk.CTkFrame(self, corner_radius=10)
@@ -186,37 +215,10 @@ class App(ctk.CTk):
         self._label_filter_frame = ctk.CTkFrame(list_frame, fg_color="transparent")
         self._label_filter_frame.grid(row=1, column=0, sticky="ew", pady=(0, 4))
 
-        # column header — sortable columns use CTkButton
-        hdr = ctk.CTkFrame(list_frame, fg_color="#2b2b2b", corner_radius=6)
-        hdr.grid(row=2, column=0, sticky="ew", pady=(0, 2))
-        hdr.grid_columnconfigure(1, weight=1)
-        _HDR_COLS = [
-            ("label",         "Label",      90,  "w"),
-            ("name",          "Task",       0,   "w"),
-            ("total_seconds", "Total time", 110, "e"),
-            ("status",        "Status",     75,  "w"),
-            ("priority",      "Priority",   75,  "w"),
-            (None,            "",           95,  "w"),
-            (None,            "",           60,  "w"),
-        ]
-        self._header_widgets = {}
-        for col, (key, text, w, anchor) in enumerate(_HDR_COLS):
-            if key is not None:
-                btn = ctk.CTkButton(
-                    hdr, text=text, font=("", 12, "bold"),
-                    width=w, anchor=anchor,
-                    fg_color="transparent", hover_color="#3a3a3a",
-                    text_color=("gray75", "gray75"),
-                    command=lambda k=key: self._set_sort(k),
-                )
-                btn.grid(row=0, column=col, padx=(12, 0), pady=2,
-                         sticky="ew" if w == 0 else "")
-                self._header_widgets[key] = btn
-            else:
-                ctk.CTkLabel(
-                    hdr, text=text, font=("", 12, "bold"),
-                    width=w, anchor=anchor,
-                ).grid(row=0, column=col, padx=(12, 0), pady=4)
+        # column header — built by _rebuild_header so it can be reordered
+        self._hdr = ctk.CTkFrame(list_frame, fg_color="#2b2b2b", corner_radius=6)
+        self._hdr.grid(row=2, column=0, sticky="ew", pady=(0, 2))
+        self._rebuild_header()
 
         self._scroll = ctk.CTkScrollableFrame(list_frame, corner_radius=8)
         self._scroll.grid(row=3, column=0, sticky="nsew")
@@ -535,12 +537,8 @@ class App(ctk.CTk):
         self._refresh_tasks()
 
     def _update_header_text(self):
-        _BASE = {
-            "name": "Task", "label": "Label", "total_seconds": "Total time",
-            "status": "Status", "priority": "Priority",
-        }
         for key, btn in self._header_widgets.items():
-            base = _BASE.get(key, key)
+            base = _COL_DEFS[key][0]
             if key == self._sort_col:
                 btn.configure(
                     text=base + (" ▲" if self._sort_asc else " ▼"),
@@ -548,6 +546,138 @@ class App(ctk.CTk):
                 )
             else:
                 btn.configure(text=base, text_color=("gray75", "gray75"))
+
+    def _rebuild_header(self):
+        for w in self._hdr.winfo_children():
+            w.destroy()
+        self._header_widgets = {}
+        # reset all column weights
+        for c in range(20):
+            self._hdr.grid_columnconfigure(c, weight=0)
+
+        # col 0: pin (non-sortable, non-draggable placeholder)
+        ctk.CTkLabel(self._hdr, text="", width=36).grid(
+            row=0, column=0, padx=(6, 0), pady=4)
+
+        # data columns (col 1 onward)
+        for idx, key in enumerate(self._col_order):
+            label, width, anchor = _COL_DEFS[key]
+            col = idx + 1
+            btn = ctk.CTkButton(
+                self._hdr, text=label, font=("", 12, "bold"),
+                width=width, anchor=anchor,
+                fg_color="transparent", hover_color="#3a3a3a",
+                text_color=("gray75", "gray75"),
+                cursor="hand2",
+            )
+            btn.grid(row=0, column=col, padx=(12, 0), pady=2,
+                     sticky="ew" if width == 0 else "")
+            btn.bind("<ButtonPress-1>",
+                     lambda e, k=key: self._on_col_drag_start(e, k))
+            btn.bind("<B1-Motion>", self._on_col_drag_motion)
+            btn.bind("<ButtonRelease-1>", self._on_col_drag_end)
+            self._header_widgets[key] = btn
+
+        # action column placeholders (Record, Detail)
+        action_col = len(self._col_order) + 1
+        ctk.CTkLabel(self._hdr, text="", width=95).grid(
+            row=0, column=action_col, padx=(12, 0), pady=4)
+        ctk.CTkLabel(self._hdr, text="", width=60).grid(
+            row=0, column=action_col + 1, padx=(12, 0), pady=4)
+
+        # flexible weight goes to the "name" column
+        name_col = self._col_order.index("name") + 1 if "name" in self._col_order else 1
+        self._hdr.grid_columnconfigure(name_col, weight=1)
+        self._update_header_text()
+
+    # ── Column drag-to-reorder ───────────────────────────────────────────────
+
+    def _on_col_drag_start(self, event, col_key: str):
+        self._drag_col = col_key
+        self._drag_start_x = event.x_root
+
+    def _on_col_drag_motion(self, event):
+        pass  # cursor already set to "hand2" on the button
+
+    def _on_col_drag_end(self, event):
+        if self._drag_col is None:
+            return
+        if abs(event.x_root - self._drag_start_x) < 8:
+            # small movement → treat as click → sort
+            self._set_sort(self._drag_col)
+        else:
+            # large movement → reorder columns
+            target = self._col_at_x(event.x_root)
+            if target and target != self._drag_col:
+                i = self._col_order.index(self._drag_col)
+                j = self._col_order.index(target)
+                self._col_order[i], self._col_order[j] = \
+                    self._col_order[j], self._col_order[i]
+                self._rebuild_header()
+                self._refresh_tasks()
+        self._drag_col = None
+
+    def _col_at_x(self, x_root: int) -> str | None:
+        for key, btn in self._header_widgets.items():
+            try:
+                bx = btn.winfo_rootx()
+                if bx <= x_root < bx + btn.winfo_width():
+                    return key
+            except Exception:
+                pass
+        return None
+
+    # ── Pin toggle ───────────────────────────────────────────────────────────
+
+    def _toggle_pin(self, task_id: int, currently_pinned: bool):
+        db.set_task_pinned(task_id, not currently_pinned)
+        self._refresh_tasks()
+
+    # ── Task col widget factory ──────────────────────────────────────────────
+
+    def _make_task_col_widget(
+        self, parent: ctk.CTkFrame, key: str, task: dict, tid: int
+    ) -> ctk.CTkBaseClass:
+        if key == "label":
+            return ctk.CTkLabel(
+                parent, text=task["label_name"] or "",
+                text_color=task["label_color"] or "#888",
+                width=90, anchor="w", font=("", 12),
+            )
+        if key == "name":
+            color = "#aaaaaa" if task["status"] == "archived" else ("#d0d0d0", "#d0d0d0")
+            return ctk.CTkLabel(
+                parent, text=task["name"], anchor="w", font=("", 13),
+                text_color=color,
+            )
+        if key == "total_seconds":
+            lbl = ctk.CTkLabel(
+                parent, text=_fmt_duration(task["total_seconds"]),
+                width=110, anchor="e", font=("", 13), text_color="#f39c12",
+            )
+            self._task_total_labels[tid] = lbl
+            return lbl
+        if key == "deadline":
+            dl = task.get("deadline") or ""
+            color = "#e74c3c" if dl and dl < date.today().isoformat() else "#888"
+            return ctk.CTkLabel(
+                parent, text=dl, width=100, anchor="w",
+                font=("", 11), text_color=color,
+            )
+        if key == "status":
+            text, color = _STATUS_STYLE.get(task["status"], ("?", "#888"))
+            return ctk.CTkLabel(
+                parent, text=text, text_color=color,
+                width=75, anchor="w", font=("", 11),
+            )
+        if key == "priority":
+            pri = task.get("priority")
+            text, color = _PRIORITY_STYLE.get(pri, ("", "#555")) if pri else ("", "#555")
+            return ctk.CTkLabel(
+                parent, text=text, text_color=color,
+                width=75, anchor="w", font=("", 11),
+            )
+        return ctk.CTkLabel(parent, text="")
 
     # ── Create task ──────────────────────────────────────────────────────────
 
@@ -588,6 +718,9 @@ class App(ctk.CTk):
         if btn:
             btn.configure(text="Stop", fg_color="#e74c3c", hover_color="#c0392b")
 
+        self._stop_btn.configure(
+            state="normal", fg_color="#e74c3c", hover_color="#c0392b"
+        )
         self._tick()
 
     def _stop(self):
@@ -604,6 +737,9 @@ class App(ctk.CTk):
         self._active_task_name = ""
         self._active_task_label = None
         self._timer_label.configure(text="--:--:--")
+        self._stop_btn.configure(
+            state="disabled", fg_color="#555", hover_color="#555"
+        )
 
         self._refresh_tasks()
 
@@ -643,54 +779,36 @@ class App(ctk.CTk):
             tid = task["id"]
             is_active = tid == self._active_task_id
             is_archived = task["status"] == "archived"
-            bg = "#1e1e1e" if row_idx % 2 == 0 else "#252525"
+            is_pinned = bool(task.get("pinned"))
+            bg = "#211f0a" if is_pinned else ("#1e1e1e" if row_idx % 2 == 0 else "#252525")
 
             row = ctk.CTkFrame(self._scroll, fg_color=bg, corner_radius=4)
             row.grid(row=row_idx, column=0, sticky="ew", pady=1)
-            row.grid_columnconfigure(1, weight=1)
 
-            # label badge
-            label_text = task["label_name"] or ""
-            label_color = task["label_color"] or "#888"
-            ctk.CTkLabel(
-                row,
-                text=label_text,
-                text_color=label_color,
-                width=90, anchor="w", font=("", 12),
-            ).grid(row=0, column=0, padx=(12, 8), pady=6)
+            # flexible weight goes to the "name" column
+            name_col = self._col_order.index("name") + 1 if "name" in self._col_order else 1
+            row.grid_columnconfigure(name_col, weight=1)
 
-            ctk.CTkLabel(
-                row, text=task["name"], anchor="w", font=("", 13),
-                text_color="#aaaaaa" if is_archived else ("#d0d0d0", "#d0d0d0"),
-            ).grid(row=0, column=1, padx=(0, 8), pady=6, sticky="ew")
+            # col 0: pin toggle button
+            ctk.CTkButton(
+                row, text="pin", width=36, height=28, font=("", 11),
+                fg_color="#4a3800" if is_pinned else "transparent",
+                hover_color="#5a4800" if is_pinned else "#3a3a3a",
+                text_color="#f39c12" if is_pinned else "#555555",
+                command=lambda t=tid, p=is_pinned: self._toggle_pin(t, p),
+            ).grid(row=0, column=0, padx=(6, 2), pady=6)
 
-            total_lbl = ctk.CTkLabel(
-                row,
-                text=_fmt_duration(task["total_seconds"]),
-                width=110, anchor="e", font=("", 13),
-                text_color="#f39c12",
-            )
-            total_lbl.grid(row=0, column=2, padx=(0, 8), pady=6)
-            self._task_total_labels[tid] = total_lbl
+            # data columns
+            for idx, key in enumerate(self._col_order):
+                col = idx + 1
+                widget = self._make_task_col_widget(row, key, task, tid)
+                is_last_data = (idx == len(self._col_order) - 1)
+                padx = (12 if idx == 0 else 0, 6 if is_last_data else 8)
+                sticky = "ew" if key == "name" else ""
+                widget.grid(row=0, column=col, padx=padx, pady=6, sticky=sticky)
 
-            # status badge
-            status_text, status_color = _STATUS_STYLE.get(
-                task["status"], ("?", "#888")
-            )
-            ctk.CTkLabel(
-                row, text=status_text, text_color=status_color,
-                width=75, anchor="w", font=("", 11),
-            ).grid(row=0, column=3, padx=(0, 6), pady=6)
-
-            # priority badge
-            pri = task.get("priority")
-            pri_text, pri_color = _PRIORITY_STYLE.get(pri, ("", "#555")) if pri else ("", "#555")
-            ctk.CTkLabel(
-                row, text=pri_text, text_color=pri_color,
-                width=75, anchor="w", font=("", 11),
-            ).grid(row=0, column=4, padx=(0, 6), pady=6)
-
-            # record button — disabled (visually) for archived tasks
+            # action buttons
+            action_col = len(self._col_order) + 1
             if is_active:
                 btn_text, btn_fg, btn_hover = "Stop", "#e74c3c", "#c0392b"
                 btn_cmd = lambda t=tid: self._toggle_record(t)
@@ -702,21 +820,17 @@ class App(ctk.CTk):
                 btn_cmd = lambda t=tid: self._toggle_record(t)
 
             btn = ctk.CTkButton(
-                row,
-                text=btn_text, width=95, height=28, font=("", 12),
-                fg_color=btn_fg, hover_color=btn_hover,
-                command=btn_cmd,
+                row, text=btn_text, width=95, height=28, font=("", 12),
+                fg_color=btn_fg, hover_color=btn_hover, command=btn_cmd,
             )
-            btn.grid(row=0, column=5, padx=(0, 6), pady=6)
+            btn.grid(row=0, column=action_col, padx=(0, 6), pady=6)
             self._task_buttons[tid] = btn
 
             ctk.CTkButton(
-                row,
-                text="Detail",
-                width=60, height=28, font=("", 12),
+                row, text="Detail", width=60, height=28, font=("", 12),
                 fg_color="#3a3a5c", hover_color="#2e2e4a",
                 command=lambda t=tid: self._open_task_detail_dialog(t),
-            ).grid(row=0, column=6, padx=(0, 10), pady=6)
+            ).grid(row=0, column=action_col + 1, padx=(0, 10), pady=6)
 
 
     # ── Task detail dialog ───────────────────────────────────────────────────
