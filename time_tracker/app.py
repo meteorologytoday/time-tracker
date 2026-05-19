@@ -1,5 +1,5 @@
 import time
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from tkinter import filedialog
 
 import customtkinter as ctk
@@ -16,6 +16,13 @@ _STATUS_STYLE: dict[str, tuple[str, str]] = {
     "active":   ("Active",   "#2ecc71"),
     "inactive": ("Inactive", "#aaaaaa"),
     "archived": ("Archived", "#666666"),
+}
+
+# (display text, color) for each priority value
+_PRIORITY_STYLE: dict[str, tuple[str, str]] = {
+    "high":   ("High", "#e74c3c"),
+    "medium": ("Med",  "#f39c12"),
+    "low":    ("Low",  "#3498db"),
 }
 
 
@@ -59,7 +66,7 @@ class App(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("Time Tracker")
-        self.geometry("780x580")
+        self.geometry("880x580")
         self.resizable(True, True)
 
         self._active_task_id: int | None = None
@@ -172,7 +179,8 @@ class App(ctk.CTk):
             ("Task",       0,   "w"),
             ("Label",      90,  "w"),
             ("Total time", 110, "e"),
-            ("Status",     80,  "w"),
+            ("Status",     75,  "w"),
+            ("Priority",   75,  "w"),
             ("",           95,  "w"),
             ("",           60,  "w"),
         ]):
@@ -564,8 +572,16 @@ class App(ctk.CTk):
             )
             ctk.CTkLabel(
                 row, text=status_text, text_color=status_color,
-                width=80, anchor="w", font=("", 11),
+                width=75, anchor="w", font=("", 11),
             ).grid(row=0, column=3, padx=(0, 6), pady=6)
+
+            # priority badge
+            pri = task.get("priority")
+            pri_text, pri_color = _PRIORITY_STYLE.get(pri, ("", "#555")) if pri else ("", "#555")
+            ctk.CTkLabel(
+                row, text=pri_text, text_color=pri_color,
+                width=75, anchor="w", font=("", 11),
+            ).grid(row=0, column=4, padx=(0, 6), pady=6)
 
             # record button — disabled (visually) for archived tasks
             if is_active:
@@ -584,7 +600,7 @@ class App(ctk.CTk):
                 fg_color=btn_fg, hover_color=btn_hover,
                 command=btn_cmd,
             )
-            btn.grid(row=0, column=4, padx=(0, 6), pady=6)
+            btn.grid(row=0, column=5, padx=(0, 6), pady=6)
             self._task_buttons[tid] = btn
 
             ctk.CTkButton(
@@ -593,7 +609,7 @@ class App(ctk.CTk):
                 width=60, height=28, font=("", 12),
                 fg_color="#3a3a5c", hover_color="#2e2e4a",
                 command=lambda t=tid: self._open_task_detail_dialog(t),
-            ).grid(row=0, column=5, padx=(0, 10), pady=6)
+            ).grid(row=0, column=6, padx=(0, 10), pady=6)
 
 
     # ── Task detail dialog ───────────────────────────────────────────────────
@@ -605,7 +621,7 @@ class App(ctk.CTk):
 
         dialog = ctk.CTkToplevel(self)
         dialog.title(f"Task Detail — {task['name']}")
-        dialog.geometry("520x580")
+        dialog.geometry("520x660")
         dialog.resizable(True, True)
         dialog.update()
         dialog.grab_set()
@@ -649,22 +665,40 @@ class App(ctk.CTk):
         status_menu.grid(row=2, column=1, columnspan=2, padx=(0, 12),
                          pady=4, sticky="w")
 
-        _row_label("Created:", 3)
+        _row_label("Priority:", 3)
+        priority_menu = ctk.CTkOptionMenu(
+            info, values=["(none)", "high", "medium", "low"],
+            width=130, height=32, font=("", 13),
+        )
+        priority_menu.set(task.get("priority") or "(none)")
+        priority_menu.grid(row=3, column=1, columnspan=2, padx=(0, 12),
+                           pady=4, sticky="w")
+
+        _row_label("Deadline:", 4)
+        deadline_var = ctk.StringVar(value=task.get("deadline") or "")
+        deadline_entry = ctk.CTkEntry(
+            info, textvariable=deadline_var,
+            placeholder_text="YYYY-MM-DD", height=32, font=("", 12), width=130,
+        )
+        deadline_entry.grid(row=4, column=1, columnspan=2, padx=(0, 12),
+                            pady=4, sticky="w")
+
+        _row_label("Created:", 5)
         created_local = datetime.fromisoformat(task["created_at"]).astimezone()
         ctk.CTkLabel(info, text=created_local.strftime("%Y-%m-%d %H:%M"),
                      anchor="w", font=("", 12)).grid(
-            row=3, column=1, columnspan=2, padx=(0, 12), pady=4, sticky="w")
+            row=5, column=1, columnspan=2, padx=(0, 12), pady=4, sticky="w")
 
-        _row_label("Total time:", 4)
+        _row_label("Total time:", 6)
         ctk.CTkLabel(info,
                      text=_fmt_duration(task["total_seconds"]),
                      anchor="w", font=("", 12), text_color="#f39c12").grid(
-            row=4, column=1, columnspan=2, padx=(0, 12), pady=(4, 4),
+            row=6, column=1, columnspan=2, padx=(0, 12), pady=(4, 4),
             sticky="w")
 
-        _row_label("Notes:", 5)
+        _row_label("Notes:", 7)
         notes_box = ctk.CTkTextbox(info, height=80, font=("", 12), wrap="word")
-        notes_box.grid(row=5, column=1, columnspan=3, padx=(0, 12), pady=(4, 10), sticky="ew")
+        notes_box.grid(row=7, column=1, columnspan=3, padx=(0, 12), pady=(4, 10), sticky="ew")
         if task.get("notes"):
             notes_box.insert("1.0", task["notes"])
 
@@ -675,12 +709,27 @@ class App(ctk.CTk):
         def _save():
             n = name_var.get().strip()
             if not n:
-                msg_label.configure(text="Name cannot be empty.")
+                msg_label.configure(text="Name cannot be empty.", text_color="#e74c3c")
                 return
+            dl = deadline_var.get().strip() or None
+            if dl:
+                try:
+                    date.fromisoformat(dl)
+                except ValueError:
+                    msg_label.configure(
+                        text="Deadline must be YYYY-MM-DD.", text_color="#e74c3c"
+                    )
+                    return
             sel = label_menu.get()
             lid = label_name_to_id.get(sel) if sel != _NO_LABEL else None
+            pri = priority_menu.get()
             notes = notes_box.get("1.0", "end-1c").strip() or None
-            db.update_task(task_id, n, lid, status_menu.get(), notes)
+            db.update_task(
+                task_id, n, lid, status_menu.get(),
+                notes=notes,
+                deadline=dl,
+                priority=pri if pri != "(none)" else None,
+            )
             if task_id in self._task_buttons:
                 self._refresh_tasks()
             dialog.title(f"Task Detail — {n}")
@@ -690,7 +739,7 @@ class App(ctk.CTk):
             info, text="Save", width=70, height=32, font=("", 13, "bold"),
             command=_save,
         )
-        save_btn.grid(row=0, column=3, rowspan=3, padx=(6, 12), pady=4)
+        save_btn.grid(row=0, column=3, rowspan=5, padx=(6, 12), pady=4)
 
         # ── Delete button ──
         def _confirm_delete():
