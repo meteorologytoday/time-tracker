@@ -67,8 +67,11 @@ tasks (
     name       TEXT    NOT NULL,
     created_at TEXT    NOT NULL,  -- UTC ISO-8601
     label_id   INTEGER REFERENCES labels(id),
-    status     TEXT NOT NULL DEFAULT 'active'
+    status     TEXT NOT NULL DEFAULT 'active',
                                   -- 'active' | 'inactive' | 'archived'
+    notes      TEXT,              -- free-form user text, nullable
+    deadline   TEXT,              -- date as YYYY-MM-DD, nullable
+    priority   TEXT               -- 'high' | 'medium' | 'low' | NULL
 )
 
 sessions (
@@ -96,14 +99,14 @@ sessions (
 | `create_task(name, label_id=None) -> int` | Returns new task id |
 | `get_tasks(status=None) -> list[dict]` | All tasks with totals; filter by status string or None for all |
 | `get_task(task_id) -> dict\|None` | Single task with label info and total |
-| `update_task(task_id, name, label_id, status)` | Edit name, label, status |
+| `update_task(task_id, name, label_id, status, notes=None, deadline=None, priority=None)` | Edit all mutable task fields |
 | `delete_task(task_id)` | Delete task and all its sessions (permanent) |
 | `start_session(task_id) -> int` | Opens a session; returns session id |
 | `stop_session(session_id)` | Closes session, writes duration |
 | `get_task_sessions(task_id) -> list[dict]` | All sessions for a task, chronological |
 
 `get_tasks` and `get_task` return dicts with these keys:
-`id, name, created_at, label_id, status, label_name, label_color, total_seconds`
+`id, name, created_at, label_id, status, priority, deadline, notes, label_name, label_color, total_seconds`
 
 All timestamps are stored and returned as UTC ISO-8601 strings. The UI layer converts to local time for display using `datetime.fromisoformat(...).astimezone()`.
 
@@ -117,6 +120,7 @@ Single-file GUI. Everything is one `App(ctk.CTk)` class plus two module-level he
 
 - `_NO_LABEL = "No label"` — sentinel string used in dropdowns when no label is selected.
 - `_STATUS_STYLE: dict[str, tuple[str, str]]` — maps each status db value to `(display_text, hex_color)`.
+- `_PRIORITY_STYLE: dict[str, tuple[str, str]]` — maps each priority db value to `(display_text, hex_color)`: High=red, Med=amber, Low=blue.
 - `_fmt_duration(seconds) -> str` — formats an integer of seconds as `HH:MM:SS`.
 - `_ColorPicker(ctk.CTkFrame)` — reusable widget: a row of colored swatch buttons where the selected swatch gets a white border. Used in both the label-create and label-edit flows.
 
@@ -159,9 +163,10 @@ Row 2  Scrollable task rows (CTkScrollableFrame)   ← weight=1
 | 0 | CTkLabel | flexible | Task name |
 | 1 | CTkLabel | 90 | Label badge (colored text) |
 | 2 | CTkLabel | 110 | Total time (amber) |
-| 3 | CTkLabel | 80 | Status badge (colored) |
-| 4 | CTkButton | 95 | Record / Stop |
-| 5 | CTkButton | 60 | Detail |
+| 3 | CTkLabel | 75 | Status badge (colored) |
+| 4 | CTkLabel | 75 | Priority badge (High/Med/Low, colored; empty if unset) |
+| 5 | CTkButton | 95 | Record / Stop |
+| 6 | CTkButton | 60 | Detail |
 
 **Timer mechanism**: `_start()` saves `time.monotonic()` and calls `_tick()`. `_tick()` computes `elapsed = now - _start_ts`, updates the timer bar and the active task's total label, then schedules itself again with `self.after(1000, self._tick)`. This runs entirely on the main thread — no threads, no concurrency issues.
 
@@ -193,6 +198,9 @@ The UI uses a fixed dark theme. Recurring colors:
 | Active status | `#2ecc71` |
 | Inactive status | `#aaaaaa` |
 | Archived status | `#666666` |
+| Priority High | `#e74c3c` |
+| Priority Medium | `#f39c12` |
+| Priority Low | `#3498db` |
 | Disabled button | `#444444` |
 | Row background (even) | `#1e1e1e` |
 | Row background (odd) | `#252525` |
@@ -208,8 +216,10 @@ Label colors are stored in `db.LABEL_COLORS` (8 options): red, orange, yellow, g
 - **Record time**: one task at a time; switching tasks auto-stops the previous one.
 - **Live timer**: elapsed time for the current session shown in the top bar; task total updates every second.
 - **Labels**: create with custom name and color swatch; edit name/color; assign to tasks at creation or via Detail. Delete a label via the label manager — cascade-deletes all tasks and their sessions, with a confirmation that lists every affected task by name.
-- **Task detail dialog**: view and edit name, label, status; read-only created date and total time; scrollable session history with per-session start/end/duration; delete task with double confirmation (blocked while the task is actively recording).
+- **Task detail dialog**: view and edit name, label, status, priority, deadline (YYYY-MM-DD, validated), and free-text notes; read-only created date and total time; scrollable session history with per-session start/end/duration; delete task with double confirmation (blocked while the task is actively recording).
 - **Task status**: `active` / `inactive` / `archived`; archived tasks have the Record button disabled. Status is editable in the Detail dialog.
+- **Priority**: three levels — `high` (red), `medium` (amber), `low` (blue) — shown as a badge in the task list and as a dropdown in the Detail dialog.
+- **Deadline**: optional date (YYYY-MM-DD) set in the Detail dialog; validated with `date.fromisoformat()` on save.
 - **Status filter tabs**: segmented button above the list ("Active" default, "Inactive", "Archived", "All").
 - **Graceful shutdown**: closing the window while recording auto-stops and saves the active session before the process exits.
 - **Settings**: customizable database path with file browser; reloads the DB on save.
@@ -234,9 +244,6 @@ The session history in the Detail dialog is currently read-only. Useful addition
 - Edit start/end time of a past session (and recompute `duration_seconds`).
 - Delete a session (with confirmation).
 - Manually add a session for time tracked offline.
-
-### Task Notes / Description
-Add a `notes TEXT` column to `tasks`. Show a multi-line text area in the Detail dialog. Useful for jotting context about a task.
 
 ### Task Ordering / Pinning
 Tasks are ordered by `id DESC` (most recent first). Consider:
