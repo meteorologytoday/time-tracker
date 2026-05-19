@@ -11,6 +11,13 @@ ctk.set_default_color_theme("blue")
 
 _NO_LABEL = "No label"
 
+# (display text, color) for each task status value
+_STATUS_STYLE: dict[str, tuple[str, str]] = {
+    "active":   ("Active",   "#2ecc71"),
+    "inactive": ("Inactive", "#aaaaaa"),
+    "archived": ("Archived", "#666666"),
+}
+
 
 def _fmt_duration(seconds: int) -> str:
     h, rem = divmod(seconds, 3600)
@@ -52,7 +59,7 @@ class App(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("Time Tracker")
-        self.geometry("680x580")
+        self.geometry("780x580")
         self.resizable(True, True)
 
         self._active_task_id: int | None = None
@@ -66,6 +73,9 @@ class App(ctk.CTk):
 
         # label id lookup: display name → id  (populated in _refresh_label_menu)
         self._label_name_to_id: dict[str, int] = {}
+
+        # current filter shown in the task list ("Active"/"Inactive"/"Archived"/"All")
+        self._status_filter = "Active"
 
         self._build_ui()
         db.init_db()
@@ -143,15 +153,25 @@ class App(ctk.CTk):
         # ── Row 2: Task list ──
         list_frame = ctk.CTkFrame(self, fg_color="transparent")
         list_frame.grid(row=2, column=0, padx=16, pady=(0, 16), sticky="nsew")
-        list_frame.grid_rowconfigure(1, weight=1)
+        list_frame.grid_rowconfigure(2, weight=1)
         list_frame.grid_columnconfigure(0, weight=1)
 
+        # filter bar
+        self._filter_bar = ctk.CTkSegmentedButton(
+            list_frame,
+            values=["Active", "Inactive", "Archived", "All"],
+            command=self._set_status_filter,
+        )
+        self._filter_bar.set("Active")
+        self._filter_bar.grid(row=0, column=0, sticky="w", pady=(0, 6))
+
         hdr = ctk.CTkFrame(list_frame, fg_color="#2b2b2b", corner_radius=6)
-        hdr.grid(row=0, column=0, sticky="ew", pady=(0, 2))
+        hdr.grid(row=1, column=0, sticky="ew", pady=(0, 2))
         for col, (text, w, anchor) in enumerate([
             ("Task",       0,   "w"),
             ("Label",      90,  "w"),
             ("Total time", 110, "e"),
+            ("Status",     80,  "w"),
             ("",           95,  "w"),
             ("",           60,  "w"),
         ]):
@@ -163,7 +183,7 @@ class App(ctk.CTk):
         hdr.grid_columnconfigure(0, weight=1)
 
         self._scroll = ctk.CTkScrollableFrame(list_frame, corner_radius=8)
-        self._scroll.grid(row=1, column=0, sticky="nsew")
+        self._scroll.grid(row=2, column=0, sticky="nsew")
         self._scroll.grid_columnconfigure(0, weight=1)
 
     # ── Label menu helpers ────────────────────────────────────────────────────
@@ -348,6 +368,10 @@ class App(ctk.CTk):
         ).grid(row=1, column=2, padx=(0, 14), pady=(0, 4))
         path_entry.bind("<Return>", lambda _: _save())
 
+    def _set_status_filter(self, value: str):
+        self._status_filter = value
+        self._refresh_tasks()
+
     # ── Create task ──────────────────────────────────────────────────────────
 
     def _create_task(self):
@@ -422,17 +446,21 @@ class App(ctk.CTk):
         self._task_buttons.clear()
         self._task_total_labels.clear()
 
-        for row_idx, task in enumerate(db.get_tasks()):
+        db_status = None if self._status_filter == "All" else self._status_filter.lower()
+        for row_idx, task in enumerate(db.get_tasks(db_status)):
             tid = task["id"]
             is_active = tid == self._active_task_id
+            is_archived = task["status"] == "archived"
             bg = "#1e1e1e" if row_idx % 2 == 0 else "#252525"
 
             row = ctk.CTkFrame(self._scroll, fg_color=bg, corner_radius=4)
             row.grid(row=row_idx, column=0, sticky="ew", pady=1)
             row.grid_columnconfigure(0, weight=1)
 
+            name_color = "#888" if is_archived else ("gray80", "gray80")
             ctk.CTkLabel(
                 row, text=task["name"], anchor="w", font=("", 13),
+                text_color="#aaaaaa" if is_archived else ("#d0d0d0", "#d0d0d0"),
             ).grid(row=0, column=0, padx=(12, 8), pady=6, sticky="ew")
 
             # label badge
@@ -454,15 +482,33 @@ class App(ctk.CTk):
             total_lbl.grid(row=0, column=2, padx=(0, 8), pady=6)
             self._task_total_labels[tid] = total_lbl
 
+            # status badge
+            status_text, status_color = _STATUS_STYLE.get(
+                task["status"], ("?", "#888")
+            )
+            ctk.CTkLabel(
+                row, text=status_text, text_color=status_color,
+                width=80, anchor="w", font=("", 11),
+            ).grid(row=0, column=3, padx=(0, 6), pady=6)
+
+            # record button — disabled (visually) for archived tasks
+            if is_active:
+                btn_text, btn_fg, btn_hover = "Stop", "#e74c3c", "#c0392b"
+                btn_cmd = lambda t=tid: self._toggle_record(t)
+            elif is_archived:
+                btn_text, btn_fg, btn_hover = "Record", "#444444", "#444444"
+                btn_cmd = lambda: None
+            else:
+                btn_text, btn_fg, btn_hover = "Record", "#2ecc71", "#27ae60"
+                btn_cmd = lambda t=tid: self._toggle_record(t)
+
             btn = ctk.CTkButton(
                 row,
-                text="Stop" if is_active else "Record",
-                width=95, height=28, font=("", 12),
-                fg_color="#e74c3c" if is_active else "#2ecc71",
-                hover_color="#c0392b" if is_active else "#27ae60",
-                command=lambda t=tid: self._toggle_record(t),
+                text=btn_text, width=95, height=28, font=("", 12),
+                fg_color=btn_fg, hover_color=btn_hover,
+                command=btn_cmd,
             )
-            btn.grid(row=0, column=3, padx=(0, 6), pady=6)
+            btn.grid(row=0, column=4, padx=(0, 6), pady=6)
             self._task_buttons[tid] = btn
 
             ctk.CTkButton(
@@ -471,7 +517,7 @@ class App(ctk.CTk):
                 width=60, height=28, font=("", 12),
                 fg_color="#3a3a5c", hover_color="#2e2e4a",
                 command=lambda t=tid: self._open_task_detail_dialog(t),
-            ).grid(row=0, column=4, padx=(0, 10), pady=6)
+            ).grid(row=0, column=5, padx=(0, 10), pady=6)
 
 
     # ── Task detail dialog ───────────────────────────────────────────────────
@@ -518,17 +564,26 @@ class App(ctk.CTk):
         label_menu.grid(row=1, column=1, columnspan=2, padx=(0, 12),
                         pady=4, sticky="w")
 
-        _row_label("Created:", 2)
+        _row_label("Status:", 2)
+        status_menu = ctk.CTkOptionMenu(
+            info, values=["active", "inactive", "archived"],
+            width=130, height=32, font=("", 13),
+        )
+        status_menu.set(task.get("status", "active"))
+        status_menu.grid(row=2, column=1, columnspan=2, padx=(0, 12),
+                         pady=4, sticky="w")
+
+        _row_label("Created:", 3)
         created_local = datetime.fromisoformat(task["created_at"]).astimezone()
         ctk.CTkLabel(info, text=created_local.strftime("%Y-%m-%d %H:%M"),
                      anchor="w", font=("", 12)).grid(
-            row=2, column=1, columnspan=2, padx=(0, 12), pady=4, sticky="w")
+            row=3, column=1, columnspan=2, padx=(0, 12), pady=4, sticky="w")
 
-        _row_label("Total time:", 3)
+        _row_label("Total time:", 4)
         ctk.CTkLabel(info,
                      text=_fmt_duration(task["total_seconds"]),
                      anchor="w", font=("", 12), text_color="#f39c12").grid(
-            row=3, column=1, columnspan=2, padx=(0, 12), pady=(4, 8),
+            row=4, column=1, columnspan=2, padx=(0, 12), pady=(4, 8),
             sticky="w")
 
         msg_label = ctk.CTkLabel(dialog, text="", font=("", 11),
@@ -542,7 +597,7 @@ class App(ctk.CTk):
                 return
             sel = label_menu.get()
             lid = label_name_to_id.get(sel) if sel != _NO_LABEL else None
-            db.update_task(task_id, n, lid)
+            db.update_task(task_id, n, lid, status_menu.get())
             if task_id in self._task_buttons:
                 self._refresh_tasks()
             dialog.title(f"Task Detail — {n}")
@@ -552,7 +607,7 @@ class App(ctk.CTk):
             info, text="Save", width=70, height=32, font=("", 13, "bold"),
             command=_save,
         )
-        save_btn.grid(row=0, column=3, rowspan=2, padx=(6, 12), pady=4)
+        save_btn.grid(row=0, column=3, rowspan=3, padx=(6, 12), pady=4)
 
         # ── Sessions list ──
         ctk.CTkLabel(dialog, text="Sessions", font=("", 13, "bold"),

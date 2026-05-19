@@ -48,10 +48,12 @@ def init_db():
                 duration_seconds INTEGER
             )
         """)
-        # migrate: add label_id to tasks if it doesn't exist yet
+        # migrations
         cols = {row[1] for row in conn.execute("PRAGMA table_info(tasks)")}
         if "label_id" not in cols:
             conn.execute("ALTER TABLE tasks ADD COLUMN label_id INTEGER REFERENCES labels(id)")
+        if "status" not in cols:
+            conn.execute("ALTER TABLE tasks ADD COLUMN status TEXT NOT NULL DEFAULT 'active'")
 
 
 # ── Labels ────────────────────────────────────────────────────────────────────
@@ -98,25 +100,32 @@ def create_task(name: str, label_id: int | None = None) -> int:
         return cursor.lastrowid
 
 
-def get_tasks() -> list[dict]:
-    """Return all tasks with total accumulated duration and label info."""
+def get_tasks(status: str | None = None) -> list[dict]:
+    """Return tasks with total accumulated duration and label info.
+
+    Pass status='active'/'inactive'/'archived' to filter; None returns all.
+    """
     with _connect() as conn:
         conn.row_factory = sqlite3.Row
-        rows = conn.execute("""
+        where = "WHERE t.status = ?" if status is not None else ""
+        params = (status,) if status is not None else ()
+        rows = conn.execute(f"""
             SELECT
                 t.id,
                 t.name,
                 t.created_at,
                 t.label_id,
+                t.status,
                 l.name  AS label_name,
                 l.color AS label_color,
                 COALESCE(SUM(s.duration_seconds), 0) AS total_seconds
             FROM tasks t
             LEFT JOIN labels  l ON l.id      = t.label_id
             LEFT JOIN sessions s ON s.task_id = t.id
+            {where}
             GROUP BY t.id
             ORDER BY t.id DESC
-        """).fetchall()
+        """, params).fetchall()
         return [dict(r) for r in rows]
 
 
@@ -125,7 +134,7 @@ def get_task(task_id: int) -> dict | None:
         conn.row_factory = sqlite3.Row
         row = conn.execute("""
             SELECT
-                t.id, t.name, t.created_at, t.label_id,
+                t.id, t.name, t.created_at, t.label_id, t.status,
                 l.name  AS label_name,
                 l.color AS label_color,
                 COALESCE(SUM(s.duration_seconds), 0) AS total_seconds
@@ -138,11 +147,11 @@ def get_task(task_id: int) -> dict | None:
         return dict(row) if row else None
 
 
-def update_task(task_id: int, name: str, label_id: int | None):
+def update_task(task_id: int, name: str, label_id: int | None, status: str):
     with _connect() as conn:
         conn.execute(
-            "UPDATE tasks SET name = ?, label_id = ? WHERE id = ?",
-            (name, label_id, task_id),
+            "UPDATE tasks SET name = ?, label_id = ?, status = ? WHERE id = ?",
+            (name, label_id, status, task_id),
         )
 
 
