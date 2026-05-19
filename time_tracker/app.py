@@ -83,6 +83,13 @@ class App(ctk.CTk):
 
         # current filter shown in the task list ("Active"/"Inactive"/"Archived"/"All")
         self._status_filter = "Active"
+        # label filter: set of label ids to include (empty = all labels)
+        self._label_filter: set[int] = set()
+        # sort state
+        self._sort_col: str = "id"
+        self._sort_asc: bool = False
+        # header button widgets (populated in _build_ui)
+        self._header_widgets: dict[str, ctk.CTkButton] = {}
 
         self._build_ui()
         db.init_db()
@@ -161,38 +168,56 @@ class App(ctk.CTk):
         # ── Row 2: Task list ──
         list_frame = ctk.CTkFrame(self, fg_color="transparent")
         list_frame.grid(row=2, column=0, padx=16, pady=(0, 16), sticky="nsew")
-        list_frame.grid_rowconfigure(2, weight=1)
+        list_frame.grid_rowconfigure(3, weight=1)
         list_frame.grid_columnconfigure(0, weight=1)
 
-        # filter bar
+        # status filter bar
         self._filter_bar = ctk.CTkSegmentedButton(
             list_frame,
             values=["Active", "Inactive", "Archived", "All"],
             command=self._set_status_filter,
         )
         self._filter_bar.set("Active")
-        self._filter_bar.grid(row=0, column=0, sticky="w", pady=(0, 6))
+        self._filter_bar.grid(row=0, column=0, sticky="w", pady=(0, 4))
 
+        # label filter chip bar (rebuilt by _refresh_label_filter_bar)
+        self._label_filter_frame = ctk.CTkFrame(list_frame, fg_color="transparent")
+        self._label_filter_frame.grid(row=1, column=0, sticky="ew", pady=(0, 4))
+
+        # column header — sortable columns use CTkButton
         hdr = ctk.CTkFrame(list_frame, fg_color="#2b2b2b", corner_radius=6)
-        hdr.grid(row=1, column=0, sticky="ew", pady=(0, 2))
-        for col, (text, w, anchor) in enumerate([
-            ("Task",       0,   "w"),
-            ("Label",      90,  "w"),
-            ("Total time", 110, "e"),
-            ("Status",     75,  "w"),
-            ("Priority",   75,  "w"),
-            ("",           95,  "w"),
-            ("",           60,  "w"),
-        ]):
-            ctk.CTkLabel(
-                hdr, text=text, font=("", 12, "bold"),
-                width=w, anchor=anchor,
-            ).grid(row=0, column=col, padx=(12, 0), pady=4,
-                   sticky="ew" if w == 0 else "")
+        hdr.grid(row=2, column=0, sticky="ew", pady=(0, 2))
         hdr.grid_columnconfigure(0, weight=1)
+        _HDR_COLS = [
+            ("name",          "Task",       0,   "w"),
+            ("label",         "Label",      90,  "w"),
+            ("total_seconds", "Total time", 110, "e"),
+            ("status",        "Status",     75,  "w"),
+            ("priority",      "Priority",   75,  "w"),
+            (None,            "",           95,  "w"),
+            (None,            "",           60,  "w"),
+        ]
+        self._header_widgets = {}
+        for col, (key, text, w, anchor) in enumerate(_HDR_COLS):
+            if key is not None:
+                btn = ctk.CTkButton(
+                    hdr, text=text, font=("", 12, "bold"),
+                    width=w, anchor=anchor,
+                    fg_color="transparent", hover_color="#3a3a3a",
+                    text_color=("gray75", "gray75"),
+                    command=lambda k=key: self._set_sort(k),
+                )
+                btn.grid(row=0, column=col, padx=(12, 0), pady=2,
+                         sticky="ew" if w == 0 else "")
+                self._header_widgets[key] = btn
+            else:
+                ctk.CTkLabel(
+                    hdr, text=text, font=("", 12, "bold"),
+                    width=w, anchor=anchor,
+                ).grid(row=0, column=col, padx=(12, 0), pady=4)
 
         self._scroll = ctk.CTkScrollableFrame(list_frame, corner_radius=8)
-        self._scroll.grid(row=2, column=0, sticky="nsew")
+        self._scroll.grid(row=3, column=0, sticky="nsew")
         self._scroll.grid_columnconfigure(0, weight=1)
 
     # ── Label menu helpers ────────────────────────────────────────────────────
@@ -204,6 +229,7 @@ class App(ctk.CTk):
         self._label_menu.configure(values=values)
         if self._label_menu.get() not in values:
             self._label_menu.set(_NO_LABEL)
+        self._refresh_label_filter_bar()
 
     def _selected_label_id(self) -> int | None:
         name = self._label_menu.get()
@@ -456,6 +482,72 @@ class App(ctk.CTk):
         self._status_filter = value
         self._refresh_tasks()
 
+    def _refresh_label_filter_bar(self):
+        for w in self._label_filter_frame.winfo_children():
+            w.destroy()
+        labels = db.get_labels()
+        # drop any stale ids (label was deleted)
+        self._label_filter &= {l["id"] for l in labels}
+        if not labels:
+            return
+        ctk.CTkLabel(
+            self._label_filter_frame, text="Labels:", font=("", 12),
+            text_color="#888",
+        ).pack(side="left", padx=(0, 6))
+        for lbl in labels:
+            lid = lbl["id"]
+            selected = lid in self._label_filter
+            ctk.CTkButton(
+                self._label_filter_frame,
+                text=lbl["name"], width=0, height=24, font=("", 11),
+                fg_color=lbl["color"] if selected else "#2a2a2a",
+                hover_color=lbl["color"],
+                text_color="#ffffff" if selected else lbl["color"],
+                border_width=1, border_color=lbl["color"],
+                command=lambda i=lid: self._toggle_label_filter(i),
+            ).pack(side="left", padx=(0, 4))
+        if self._label_filter:
+            ctk.CTkButton(
+                self._label_filter_frame,
+                text="Clear", width=46, height=24, font=("", 11),
+                fg_color="#555", hover_color="#444",
+                command=self._clear_label_filter,
+            ).pack(side="left", padx=(4, 0))
+
+    def _toggle_label_filter(self, label_id: int):
+        self._label_filter ^= {label_id}
+        self._refresh_label_filter_bar()
+        self._refresh_tasks()
+
+    def _clear_label_filter(self):
+        self._label_filter.clear()
+        self._refresh_label_filter_bar()
+        self._refresh_tasks()
+
+    def _set_sort(self, col_key: str):
+        if self._sort_col == col_key:
+            self._sort_asc = not self._sort_asc
+        else:
+            self._sort_col = col_key
+            self._sort_asc = True
+        self._update_header_text()
+        self._refresh_tasks()
+
+    def _update_header_text(self):
+        _BASE = {
+            "name": "Task", "label": "Label", "total_seconds": "Total time",
+            "status": "Status", "priority": "Priority",
+        }
+        for key, btn in self._header_widgets.items():
+            base = _BASE.get(key, key)
+            if key == self._sort_col:
+                btn.configure(
+                    text=base + (" ▲" if self._sort_asc else " ▼"),
+                    text_color="#f39c12",
+                )
+            else:
+                btn.configure(text=base, text_color=("gray75", "gray75"))
+
     # ── Create task ──────────────────────────────────────────────────────────
 
     def _create_task(self):
@@ -531,7 +623,13 @@ class App(ctk.CTk):
         self._task_total_labels.clear()
 
         db_status = None if self._status_filter == "All" else self._status_filter.lower()
-        for row_idx, task in enumerate(db.get_tasks(db_status)):
+        label_ids = list(self._label_filter) if self._label_filter else None
+        for row_idx, task in enumerate(db.get_tasks(
+            status=db_status,
+            label_ids=label_ids,
+            sort_col=self._sort_col,
+            sort_asc=self._sort_asc,
+        )):
             tid = task["id"]
             is_active = tid == self._active_task_id
             is_archived = task["status"] == "archived"
