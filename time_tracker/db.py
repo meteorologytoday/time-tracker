@@ -81,6 +81,28 @@ def get_labels() -> list[dict]:
         return [dict(r) for r in rows]
 
 
+def get_tasks_by_label(label_id: int) -> list[dict]:
+    """Return id and name for every task assigned to this label."""
+    with _connect() as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT id, name FROM tasks WHERE label_id = ? ORDER BY name",
+            (label_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def delete_label(label_id: int):
+    """Delete the label and cascade-delete all its tasks and their sessions."""
+    with _connect() as conn:
+        conn.execute("""
+            DELETE FROM sessions
+            WHERE task_id IN (SELECT id FROM tasks WHERE label_id = ?)
+        """, (label_id,))
+        conn.execute("DELETE FROM tasks WHERE label_id = ?", (label_id,))
+        conn.execute("DELETE FROM labels WHERE id = ?", (label_id,))
+
+
 def set_task_label(task_id: int, label_id: int | None):
     with _connect() as conn:
         conn.execute(

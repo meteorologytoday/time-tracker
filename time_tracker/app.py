@@ -288,6 +288,71 @@ class App(ctk.CTk):
                           ).pack(side="left")
             name_e.bind("<Return>", lambda _: _save())
 
+        def _open_delete_confirm(lbl: dict):
+            affected = db.get_tasks_by_label(lbl["id"])
+
+            confirm = ctk.CTkToplevel(dialog)
+            confirm.title("Confirm Delete")
+            confirm.geometry("400x320")
+            confirm.resizable(False, True)
+            confirm.update()
+            confirm.grab_set()
+            confirm.grid_columnconfigure(0, weight=1)
+            confirm.grid_rowconfigure(1, weight=1)
+
+            if affected:
+                header = (
+                    f'Delete label "{lbl["name"]}"?\n\n'
+                    f"The following {len(affected)} task(s) and all their\n"
+                    "sessions will also be permanently deleted:"
+                )
+            else:
+                header = (
+                    f'Delete label "{lbl["name"]}"?\n\n'
+                    "No tasks use this label.\nThis cannot be undone."
+                )
+
+            ctk.CTkLabel(
+                confirm, text=header, font=("", 13),
+                wraplength=360, justify="center",
+            ).grid(row=0, column=0, padx=20, pady=(20, 8))
+
+            if affected:
+                task_scroll = ctk.CTkScrollableFrame(confirm, height=120, corner_radius=6)
+                task_scroll.grid(row=1, column=0, padx=20, pady=(0, 8), sticky="nsew")
+                task_scroll.grid_columnconfigure(0, weight=1)
+                for i, t in enumerate(affected):
+                    ctk.CTkLabel(
+                        task_scroll, text=f"- {t['name']}",
+                        anchor="w", font=("", 12), text_color="#aaa",
+                    ).grid(row=i, column=0, padx=8, pady=1, sticky="w")
+
+                ctk.CTkLabel(
+                    confirm, text="This cannot be undone.",
+                    font=("", 11), text_color="#e74c3c",
+                ).grid(row=2, column=0, pady=(0, 6))
+
+            btn_row = ctk.CTkFrame(confirm, fg_color="transparent")
+            btn_row.grid(row=3, column=0, pady=(0, 18))
+
+            def _do_delete():
+                db.delete_label(lbl["id"])
+                self._refresh_label_menu()
+                self._refresh_tasks()
+                confirm.destroy()
+                _refresh_list()
+
+            ctk.CTkButton(
+                btn_row, text="Delete permanently", width=150, height=32,
+                font=("", 13, "bold"), fg_color="#e74c3c", hover_color="#c0392b",
+                command=_do_delete,
+            ).pack(side="left", padx=(0, 8))
+            ctk.CTkButton(
+                btn_row, text="Cancel", width=80, height=32,
+                font=("", 13), fg_color="#555", hover_color="#444",
+                command=confirm.destroy,
+            ).pack(side="left")
+
         def _refresh_list():
             for w in scroll.winfo_children():
                 w.destroy()
@@ -303,7 +368,12 @@ class App(ctk.CTk):
                     row, text="Edit", width=48, height=26, font=("", 12),
                     fg_color="#555", hover_color="#444",
                     command=lambda l=lbl: _open_edit(l),
-                ).grid(row=0, column=1, padx=(0, 8), pady=6)
+                ).grid(row=0, column=1, padx=(0, 4), pady=6)
+                ctk.CTkButton(
+                    row, text="Delete", width=54, height=26, font=("", 12),
+                    fg_color="#5a1a1a", hover_color="#7a2020",
+                    command=lambda l=lbl: _open_delete_confirm(l),
+                ).grid(row=0, column=2, padx=(0, 8), pady=6)
 
         _refresh_list()
 
