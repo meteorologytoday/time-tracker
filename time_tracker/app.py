@@ -605,7 +605,7 @@ class App(ctk.CTk):
 
         dialog = ctk.CTkToplevel(self)
         dialog.title(f"Task Detail — {task['name']}")
-        dialog.geometry("520x500")
+        dialog.geometry("520x580")
         dialog.resizable(True, True)
         dialog.update()
         dialog.grab_set()
@@ -659,8 +659,14 @@ class App(ctk.CTk):
         ctk.CTkLabel(info,
                      text=_fmt_duration(task["total_seconds"]),
                      anchor="w", font=("", 12), text_color="#f39c12").grid(
-            row=4, column=1, columnspan=2, padx=(0, 12), pady=(4, 8),
+            row=4, column=1, columnspan=2, padx=(0, 12), pady=(4, 4),
             sticky="w")
+
+        _row_label("Notes:", 5)
+        notes_box = ctk.CTkTextbox(info, height=80, font=("", 12), wrap="word")
+        notes_box.grid(row=5, column=1, columnspan=3, padx=(0, 12), pady=(4, 10), sticky="ew")
+        if task.get("notes"):
+            notes_box.insert("1.0", task["notes"])
 
         msg_label = ctk.CTkLabel(dialog, text="", font=("", 11),
                                  text_color="#e74c3c")
@@ -673,7 +679,8 @@ class App(ctk.CTk):
                 return
             sel = label_menu.get()
             lid = label_name_to_id.get(sel) if sel != _NO_LABEL else None
-            db.update_task(task_id, n, lid, status_menu.get())
+            notes = notes_box.get("1.0", "end-1c").strip() or None
+            db.update_task(task_id, n, lid, status_menu.get(), notes)
             if task_id in self._task_buttons:
                 self._refresh_tasks()
             dialog.title(f"Task Detail — {n}")
