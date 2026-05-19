@@ -77,6 +77,8 @@ class App(ctk.CTk):
         self._task_buttons: dict[int, ctk.CTkButton] = {}
         self._task_total_labels: dict[int, ctk.CTkLabel] = {}
         self._active_base_seconds: int = 0
+        self._active_task_name: str = ""
+        self._active_task_label: str | None = None
 
         # label id lookup: display name → id  (populated in _refresh_label_menu)
         self._label_name_to_id: dict[str, int] = {}
@@ -109,8 +111,8 @@ class App(ctk.CTk):
 
         self._timer_label = ctk.CTkLabel(
             timer_bar,
-            text="Timer: --:--:--",
-            font=("", 22, "bold"),
+            text="--:--:--",
+            font=("", 20, "bold"),
             text_color="#f39c12",
             anchor="center",
         )
@@ -577,7 +579,10 @@ class App(ctk.CTk):
         self._running = True
 
         tasks = {t["id"]: t for t in db.get_tasks()}
-        self._active_base_seconds = tasks[task_id]["total_seconds"] if task_id in tasks else 0
+        active = tasks.get(task_id, {})
+        self._active_base_seconds = active.get("total_seconds", 0)
+        self._active_task_name = active.get("name", "")
+        self._active_task_label = active.get("label_name")
 
         btn = self._task_buttons.get(task_id)
         if btn:
@@ -596,7 +601,9 @@ class App(ctk.CTk):
         self._active_task_id = None
         self._active_session_id = None
         self._start_ts = None
-        self._timer_label.configure(text="Timer: --:--:--")
+        self._active_task_name = ""
+        self._active_task_label = None
+        self._timer_label.configure(text="--:--:--")
 
         self._refresh_tasks()
 
@@ -607,7 +614,11 @@ class App(ctk.CTk):
             return
         elapsed = int(time.monotonic() - self._start_ts)
         total = self._active_base_seconds + elapsed
-        self._timer_label.configure(text=f"Timer: {_fmt_duration(elapsed)}")
+        if self._active_task_label:
+            prefix = f"[{self._active_task_label}] {self._active_task_name}"
+        else:
+            prefix = self._active_task_name
+        self._timer_label.configure(text=f"{prefix}: {_fmt_duration(elapsed)}")
         lbl = self._task_total_labels.get(self._active_task_id)
         if lbl:
             lbl.configure(text=_fmt_duration(total))
