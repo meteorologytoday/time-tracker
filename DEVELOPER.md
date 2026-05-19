@@ -170,8 +170,8 @@ Sortable column headers are `CTkButton` widgets (transparent background, amber t
 
 | Col | Widget | Width | Content |
 |---|---|---|---|
-| 0 | CTkLabel | flexible | Task name |
-| 1 | CTkLabel | 90 | Label badge (colored text) |
+| 0 | CTkLabel | 90 | Label badge (colored text) |
+| 1 | CTkLabel | flexible | Task name |
 | 2 | CTkLabel | 110 | Total time (amber) |
 | 3 | CTkLabel | 75 | Status badge (colored) |
 | 4 | CTkLabel | 75 | Priority badge (High/Med/Low, colored; empty if unset) |
@@ -231,7 +231,7 @@ Label colors are stored in `db.LABEL_COLORS` (8 options): red, orange, yellow, g
 - **Priority**: three levels — `high` (red), `medium` (amber), `low` (blue) — shown as a badge in the task list and as a dropdown in the Detail dialog.
 - **Deadline**: optional date (YYYY-MM-DD) set in the Detail dialog; validated with `date.fromisoformat()` on save.
 - **Status filter tabs**: segmented button above the list ("Active" default, "Inactive", "Archived", "All").
-- **Label filter chips**: a row of colored toggleable chip buttons below the status tabs, one per label. Multiple labels can be active simultaneously; only tasks whose label matches are shown. A "Clear" button appears when any chip is active. The chip row rebuilds whenever labels change, and stale ids are pruned from `_label_filter` automatically.
+- **Label filter chips**: a row of colored toggleable chip buttons below the status tabs, one per label. Multiple labels can be active simultaneously; only tasks whose label matches are shown. A "Clear" button is always visible at the far left of the chip bar. The chip row rebuilds whenever labels change, and stale ids are pruned from `_label_filter` automatically.
 - **Sortable columns**: clicking any column header sorts by that column (ascending first; click again to reverse). Active column highlighted in amber with ▲/▼. Sort is done in SQL via `_SORT_EXPR`. Priority sorts high→medium→low→unset; deadline sorts NULL-last in both directions. All filters (status, label, sort) compose.
 - **Graceful shutdown**: closing the window while recording auto-stops and saves the active session before the process exits.
 - **Settings**: customizable database path with file browser; reloads the DB on save.
