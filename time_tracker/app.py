@@ -187,10 +187,10 @@ class App(ctk.CTk):
         # column header — sortable columns use CTkButton
         hdr = ctk.CTkFrame(list_frame, fg_color="#2b2b2b", corner_radius=6)
         hdr.grid(row=2, column=0, sticky="ew", pady=(0, 2))
-        hdr.grid_columnconfigure(0, weight=1)
+        hdr.grid_columnconfigure(1, weight=1)
         _HDR_COLS = [
-            ("name",          "Task",       0,   "w"),
             ("label",         "Label",      90,  "w"),
+            ("name",          "Task",       0,   "w"),
             ("total_seconds", "Total time", 110, "e"),
             ("status",        "Status",     75,  "w"),
             ("priority",      "Priority",   75,  "w"),
@@ -636,13 +636,7 @@ class App(ctk.CTk):
 
             row = ctk.CTkFrame(self._scroll, fg_color=bg, corner_radius=4)
             row.grid(row=row_idx, column=0, sticky="ew", pady=1)
-            row.grid_columnconfigure(0, weight=1)
-
-            name_color = "#888" if is_archived else ("gray80", "gray80")
-            ctk.CTkLabel(
-                row, text=task["name"], anchor="w", font=("", 13),
-                text_color="#aaaaaa" if is_archived else ("#d0d0d0", "#d0d0d0"),
-            ).grid(row=0, column=0, padx=(12, 8), pady=6, sticky="ew")
+            row.grid_columnconfigure(1, weight=1)
 
             # label badge
             label_text = task["label_name"] or ""
@@ -652,7 +646,12 @@ class App(ctk.CTk):
                 text=label_text,
                 text_color=label_color,
                 width=90, anchor="w", font=("", 12),
-            ).grid(row=0, column=1, padx=(0, 8), pady=6)
+            ).grid(row=0, column=0, padx=(12, 8), pady=6)
+
+            ctk.CTkLabel(
+                row, text=task["name"], anchor="w", font=("", 13),
+                text_color="#aaaaaa" if is_archived else ("#d0d0d0", "#d0d0d0"),
+            ).grid(row=0, column=1, padx=(0, 8), pady=6, sticky="ew")
 
             total_lbl = ctk.CTkLabel(
                 row,
