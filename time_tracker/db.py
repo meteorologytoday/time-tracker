@@ -120,6 +120,32 @@ def get_tasks() -> list[dict]:
         return [dict(r) for r in rows]
 
 
+def get_task(task_id: int) -> dict | None:
+    with _connect() as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute("""
+            SELECT
+                t.id, t.name, t.created_at, t.label_id,
+                l.name  AS label_name,
+                l.color AS label_color,
+                COALESCE(SUM(s.duration_seconds), 0) AS total_seconds
+            FROM tasks t
+            LEFT JOIN labels   l ON l.id      = t.label_id
+            LEFT JOIN sessions s ON s.task_id = t.id
+            WHERE t.id = ?
+            GROUP BY t.id
+        """, (task_id,)).fetchone()
+        return dict(row) if row else None
+
+
+def update_task(task_id: int, name: str, label_id: int | None):
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE tasks SET name = ?, label_id = ? WHERE id = ?",
+            (name, label_id, task_id),
+        )
+
+
 # ── Sessions ──────────────────────────────────────────────────────────────────
 
 def start_session(task_id: int) -> int:
@@ -130,6 +156,18 @@ def start_session(task_id: int) -> int:
             (task_id, now),
         )
         return cursor.lastrowid
+
+
+def get_task_sessions(task_id: int) -> list[dict]:
+    with _connect() as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute("""
+            SELECT id, start_time, end_time, duration_seconds
+            FROM sessions
+            WHERE task_id = ?
+            ORDER BY start_time ASC
+        """, (task_id,)).fetchall()
+        return [dict(r) for r in rows]
 
 
 def stop_session(session_id: int):

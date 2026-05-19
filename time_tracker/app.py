@@ -1,4 +1,5 @@
 import time
+from datetime import datetime, timezone
 from tkinter import filedialog
 
 import customtkinter as ctk
@@ -152,6 +153,7 @@ class App(ctk.CTk):
             ("Label",      90,  "w"),
             ("Total time", 110, "e"),
             ("",           95,  "w"),
+            ("",           60,  "w"),
         ]):
             ctk.CTkLabel(
                 hdr, text=text, font=("", 12, "bold"),
@@ -460,8 +462,158 @@ class App(ctk.CTk):
                 hover_color="#c0392b" if is_active else "#27ae60",
                 command=lambda t=tid: self._toggle_record(t),
             )
-            btn.grid(row=0, column=3, padx=(0, 10), pady=6)
+            btn.grid(row=0, column=3, padx=(0, 6), pady=6)
             self._task_buttons[tid] = btn
+
+            ctk.CTkButton(
+                row,
+                text="Detail",
+                width=60, height=28, font=("", 12),
+                fg_color="#3a3a5c", hover_color="#2e2e4a",
+                command=lambda t=tid: self._open_task_detail_dialog(t),
+            ).grid(row=0, column=4, padx=(0, 10), pady=6)
+
+
+    # ── Task detail dialog ───────────────────────────────────────────────────
+
+    def _open_task_detail_dialog(self, task_id: int):
+        task = db.get_task(task_id)
+        if task is None:
+            return
+
+        dialog = ctk.CTkToplevel(self)
+        dialog.title(f"Task Detail — {task['name']}")
+        dialog.geometry("520x500")
+        dialog.resizable(True, True)
+        dialog.update()
+        dialog.grab_set()
+        dialog.grid_columnconfigure(0, weight=1)
+        dialog.grid_rowconfigure(2, weight=1)
+
+        # ── Info / edit frame ──
+        info = ctk.CTkFrame(dialog, corner_radius=8)
+        info.grid(row=0, column=0, padx=14, pady=(14, 6), sticky="ew")
+        info.grid_columnconfigure(1, weight=1)
+
+        def _row_label(text, r):
+            ctk.CTkLabel(info, text=text, anchor="e", font=("", 12),
+                         text_color="#888").grid(
+                row=r, column=0, padx=(12, 8), pady=4, sticky="e")
+
+        _row_label("Name:", 0)
+        name_var = ctk.StringVar(value=task["name"])
+        ctk.CTkEntry(info, textvariable=name_var, height=32, font=("", 13),
+                     ).grid(row=0, column=1, columnspan=2, padx=(0, 12),
+                            pady=4, sticky="ew")
+
+        _row_label("Label:", 1)
+        labels = db.get_labels()
+        label_name_to_id = {l["name"]: l["id"] for l in labels}
+        label_values = [_NO_LABEL] + [l["name"] for l in labels]
+        current_label = task["label_name"] or _NO_LABEL
+        label_menu = ctk.CTkOptionMenu(
+            info, values=label_values, width=160, height=32, font=("", 13),
+        )
+        label_menu.set(current_label)
+        label_menu.grid(row=1, column=1, columnspan=2, padx=(0, 12),
+                        pady=4, sticky="w")
+
+        _row_label("Created:", 2)
+        created_local = datetime.fromisoformat(task["created_at"]).astimezone()
+        ctk.CTkLabel(info, text=created_local.strftime("%Y-%m-%d %H:%M"),
+                     anchor="w", font=("", 12)).grid(
+            row=2, column=1, columnspan=2, padx=(0, 12), pady=4, sticky="w")
+
+        _row_label("Total time:", 3)
+        ctk.CTkLabel(info,
+                     text=_fmt_duration(task["total_seconds"]),
+                     anchor="w", font=("", 12), text_color="#f39c12").grid(
+            row=3, column=1, columnspan=2, padx=(0, 12), pady=(4, 8),
+            sticky="w")
+
+        msg_label = ctk.CTkLabel(dialog, text="", font=("", 11),
+                                 text_color="#e74c3c")
+        msg_label.grid(row=1, column=0, padx=14, sticky="w")
+
+        def _save():
+            n = name_var.get().strip()
+            if not n:
+                msg_label.configure(text="Name cannot be empty.")
+                return
+            sel = label_menu.get()
+            lid = label_name_to_id.get(sel) if sel != _NO_LABEL else None
+            db.update_task(task_id, n, lid)
+            if task_id in self._task_buttons:
+                self._refresh_tasks()
+            dialog.title(f"Task Detail — {n}")
+            msg_label.configure(text="Saved.", text_color="#2ecc71")
+
+        save_btn = ctk.CTkButton(
+            info, text="Save", width=70, height=32, font=("", 13, "bold"),
+            command=_save,
+        )
+        save_btn.grid(row=0, column=3, rowspan=2, padx=(6, 12), pady=4)
+
+        # ── Sessions list ──
+        ctk.CTkLabel(dialog, text="Sessions", font=("", 13, "bold"),
+                     anchor="w").grid(row=2, column=0, padx=14, pady=(6, 2),
+                                      sticky="nw")
+
+        sessions_outer = ctk.CTkFrame(dialog, corner_radius=8)
+        sessions_outer.grid(row=2, column=0, padx=14, pady=(28, 14),
+                            sticky="nsew")
+        sessions_outer.grid_columnconfigure(0, weight=1)
+        sessions_outer.grid_rowconfigure(1, weight=1)
+
+        # header row
+        shdr = ctk.CTkFrame(sessions_outer, fg_color="#2b2b2b", corner_radius=4)
+        shdr.grid(row=0, column=0, sticky="ew", padx=4, pady=(4, 0))
+        for scol, (stxt, sw) in enumerate([
+            ("#",        30),
+            ("Start",   165),
+            ("End",     165),
+            ("Duration", 90),
+        ]):
+            ctk.CTkLabel(shdr, text=stxt, width=sw, font=("", 11, "bold"),
+                         anchor="w").grid(row=0, column=scol, padx=(6, 0),
+                                          pady=3)
+
+        scroll = ctk.CTkScrollableFrame(sessions_outer, corner_radius=4)
+        scroll.grid(row=1, column=0, sticky="nsew", padx=4, pady=(0, 4))
+        scroll.grid_columnconfigure(1, weight=1)
+
+        sessions = db.get_task_sessions(task_id)
+        if not sessions:
+            ctk.CTkLabel(scroll, text="No sessions recorded yet.",
+                         font=("", 12), text_color="#888").grid(
+                row=0, column=0, columnspan=4, padx=8, pady=8, sticky="w")
+        else:
+            for i, s in enumerate(sessions):
+                bg = "#1e1e1e" if i % 2 == 0 else "#252525"
+                srow = ctk.CTkFrame(scroll, fg_color=bg, corner_radius=3)
+                srow.grid(row=i, column=0, sticky="ew", pady=1)
+
+                start_dt = datetime.fromisoformat(s["start_time"]).astimezone()
+                start_str = start_dt.strftime("%Y-%m-%d %H:%M")
+
+                if s["end_time"]:
+                    end_dt = datetime.fromisoformat(s["end_time"]).astimezone()
+                    end_str = end_dt.strftime("%Y-%m-%d %H:%M")
+                else:
+                    end_str = "In progress"
+
+                dur = _fmt_duration(s["duration_seconds"] or 0)
+
+                for scol, (val, sw, color) in enumerate([
+                    (str(i + 1),  30,  "#888"),
+                    (start_str,  165,  "#ccc"),
+                    (end_str,    165,  "#ccc" if s["end_time"] else "#f39c12"),
+                    (dur,         90,  "#f39c12"),
+                ]):
+                    ctk.CTkLabel(
+                        srow, text=val, width=sw, font=("", 11),
+                        anchor="w", text_color=color,
+                    ).grid(row=0, column=scol, padx=(6, 0), pady=3)
 
 
 def main():
