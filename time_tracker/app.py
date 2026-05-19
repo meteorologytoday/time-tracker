@@ -534,7 +534,7 @@ class App(ctk.CTk):
         dialog.update()
         dialog.grab_set()
         dialog.grid_columnconfigure(0, weight=1)
-        dialog.grid_rowconfigure(2, weight=1)
+        dialog.grid_rowconfigure(3, weight=1)
 
         # ── Info / edit frame ──
         info = ctk.CTkFrame(dialog, corner_radius=8)
@@ -609,13 +609,69 @@ class App(ctk.CTk):
         )
         save_btn.grid(row=0, column=3, rowspan=3, padx=(6, 12), pady=4)
 
+        # ── Delete button ──
+        def _confirm_delete():
+            if task_id == self._active_task_id:
+                msg_label.configure(
+                    text="Stop recording before deleting.", text_color="#e74c3c"
+                )
+                return
+
+            session_count = len(db.get_task_sessions(task_id))
+            confirm = ctk.CTkToplevel(dialog)
+            confirm.title("Confirm Delete")
+            confirm.geometry("380x170")
+            confirm.resizable(False, False)
+            confirm.update()
+            confirm.grab_set()
+            confirm.grid_columnconfigure(0, weight=1)
+
+            ctk.CTkLabel(
+                confirm,
+                text=(
+                    f'Delete "{task["name"]}"?\n\n'
+                    f"This will permanently remove the task and "
+                    f"all {session_count} session(s).\n"
+                    "This cannot be undone."
+                ),
+                font=("", 13),
+                wraplength=340,
+                justify="center",
+            ).grid(row=0, column=0, padx=20, pady=(20, 14))
+
+            btn_row = ctk.CTkFrame(confirm, fg_color="transparent")
+            btn_row.grid(row=1, column=0, pady=(0, 18))
+
+            def _do_delete():
+                db.delete_task(task_id)
+                self._refresh_tasks()
+                confirm.destroy()
+                dialog.destroy()
+
+            ctk.CTkButton(
+                btn_row, text="Delete permanently", width=150, height=32,
+                font=("", 13, "bold"), fg_color="#e74c3c", hover_color="#c0392b",
+                command=_do_delete,
+            ).pack(side="left", padx=(0, 8))
+            ctk.CTkButton(
+                btn_row, text="Cancel", width=80, height=32,
+                font=("", 13), fg_color="#555", hover_color="#444",
+                command=confirm.destroy,
+            ).pack(side="left")
+
+        ctk.CTkButton(
+            dialog, text="Delete Task...", width=120, height=28, font=("", 12),
+            fg_color="#5a1a1a", hover_color="#7a2020",
+            command=_confirm_delete,
+        ).grid(row=2, column=0, padx=14, pady=(2, 4), sticky="w")
+
         # ── Sessions list ──
         ctk.CTkLabel(dialog, text="Sessions", font=("", 13, "bold"),
-                     anchor="w").grid(row=2, column=0, padx=14, pady=(6, 2),
+                     anchor="w").grid(row=3, column=0, padx=14, pady=(6, 2),
                                       sticky="nw")
 
         sessions_outer = ctk.CTkFrame(dialog, corner_radius=8)
-        sessions_outer.grid(row=2, column=0, padx=14, pady=(28, 14),
+        sessions_outer.grid(row=3, column=0, padx=14, pady=(28, 14),
                             sticky="nsew")
         sessions_outer.grid_columnconfigure(0, weight=1)
         sessions_outer.grid_rowconfigure(1, weight=1)

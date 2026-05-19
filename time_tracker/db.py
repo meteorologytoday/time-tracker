@@ -155,6 +155,12 @@ def update_task(task_id: int, name: str, label_id: int | None, status: str):
         )
 
 
+def delete_task(task_id: int):
+    with _connect() as conn:
+        conn.execute("DELETE FROM sessions WHERE task_id = ?", (task_id,))
+        conn.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
+
+
 # ── Sessions ──────────────────────────────────────────────────────────────────
 
 def start_session(task_id: int) -> int:
