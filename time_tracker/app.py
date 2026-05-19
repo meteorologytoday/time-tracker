@@ -490,6 +490,12 @@ class App(ctk.CTk):
         self._label_filter &= {l["id"] for l in labels}
         if not labels:
             return
+        ctk.CTkButton(
+            self._label_filter_frame,
+            text="Clear", width=46, height=24, font=("", 11),
+            fg_color="#555", hover_color="#444",
+            command=self._clear_label_filter,
+        ).pack(side="left", padx=(0, 8))
         ctk.CTkLabel(
             self._label_filter_frame, text="Labels:", font=("", 12),
             text_color="#888",
@@ -506,13 +512,6 @@ class App(ctk.CTk):
                 border_width=1, border_color=lbl["color"],
                 command=lambda i=lid: self._toggle_label_filter(i),
             ).pack(side="left", padx=(0, 4))
-        if self._label_filter:
-            ctk.CTkButton(
-                self._label_filter_frame,
-                text="Clear", width=46, height=24, font=("", 11),
-                fg_color="#555", hover_color="#444",
-                command=self._clear_label_filter,
-            ).pack(side="left", padx=(4, 0))
 
     def _toggle_label_filter(self, label_id: int):
         self._label_filter ^= {label_id}
